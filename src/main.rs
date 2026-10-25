@@ -12,7 +12,7 @@ use clap::Parser;
 use config::Config;
 use crossterm::event::{self, Event};
 use serde::Serialize;
-use std::io::Stdout;
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
 use std::time::{Duration, Instant};
@@ -84,6 +84,13 @@ async fn main() -> Result<()> {
 
     if cli.json {
         return run_json(&cli, &config, &paths).await;
+    }
+
+    if !std::io::stdout().is_terminal() {
+        bail!(
+            "Utui needs a terminal for the TUI. Use --json for scriptable output, \
+             or run it from an interactive shell."
+        );
     }
 
     let store = Store::load(&paths.state_file())?;
@@ -415,6 +422,3 @@ fn edit_config(path: &Path) -> Result<()> {
     }
     Ok(())
 }
-
-#[allow(dead_code)]
-fn _assert_tui_types(_terminal: ratatui::Terminal<ratatui::backend::CrosstermBackend<Stdout>>) {}
