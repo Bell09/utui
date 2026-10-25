@@ -1,0 +1,1303 @@
+use crate::config::{Config, Paths};
+use crate::store::Store;
+use crate::util::{copy_to_clipboard, now_unix, truncate};
+use crate::yt::{self, FeedData, FetchSpec, Video};
+use anyhow::{bail, Result};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::widgets::TableState;
+use std::time::{Duration, Instant};
+
+const TOAST_LIFETIME: Duration = Duration::from_secs(5);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum View {
+    Home,
+    Browse,
+    Settings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeedKind {
+    Search,
+    Remote,
+    Channel,
+    Playlist,
+    Saved,
+    History,
+}
+
+impl FeedKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Search => "SEARCH",
+            Self::Remote => "REMOTE",
+            Self::Channel => "CHANNEL",
+            Self::Playlist => "PLAYLIST",
+            Self::Saved => "LOCAL COLLECTION",
+            Self::History => "WATCHED LOCALLY",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Feed {
+    pub title: String,
+    pub source: String,
+    pub kind: FeedKind,
+    pub subtitle: String,
+    pub items: Vec<Video>,
+    pub notice: Option<String>,
+    pub auth: bool,
+    pub fetched_at: i64,
+}
+
+impl Feed {
+    pub fn empty() -> Self {
+        Self {
+            title: String::new(),
+            source: String::new(),
+            kind: FeedKind::Remote,
+            subtitle: String::new(),
+            items: Vec::new(),
+            notice: None,
+            auth: false,
+            fetched_at: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToastKind {
+    Info,
+    Success,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+pub struct Toast {
+    pub text: String,
+    pub kind: ToastKind,
+    created: Instant,
+}
+
+impl Toast {
+    pub fn is_visible(&self, now: Instant) -> bool {
+        now.duration_since(self.created) < TOAST_LIFETIME
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TextInput {
+    pub value: String,
+    pub cursor: usize,
+}
+
+impl TextInput {
+    pub fn handle_key(&mut self, key: &KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char(character) => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    match character.to_ascii_lowercase() {
+                        'u' => {
+                            self.value.clear();
+                            self.cursor = 0;
+                            true
+                        }
+                        'w' => {
+                            self.delete_word();
+                            true
+                        }
+                        'a' => {
+                            self.cursor = 0;
+                            true
+                        }
+                        'e' => {
+                            self.cursor = self.char_count();
+                            true
+                        }
+                        _ => false,
+                    }
+                } else {
+                    self.insert(character);
+                    true
+                }
+            }
+            KeyCode::Backspace => {
+                self.backspace();
+                true
+            }
+            KeyCode::Delete => {
+                self.delete();
+                true
+            }
+            KeyCode::Left => {
+                self.cursor = self.cursor.saturating_sub(1);
+                true
+            }
+            KeyCode::Right => {
+                self.cursor = (self.cursor + 1).min(self.char_count());
+                true
+            }
+            KeyCode::Home => {
+                self.cursor = 0;
+                true
+            }
+            KeyCode::End => {
+                self.cursor = self.char_count();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn insert_str(&mut self, value: &str) {
+        for character in value.chars() {
+            self.insert(character);
+        }
+    }
+
+    pub fn char_count(&self) -> usize {
+        self.value.chars().count()
+    }
+
+    pub fn cursor_byte(&self) -> usize {
+        self.value
+            .char_indices()
+            .nth(self.cursor)
+            .map(|(byte, _)| byte)
+            .unwrap_or(self.value.len())
+    }
+
+    pub fn cursor_width(&self) -> usize {
+        crate::util::display_width(&self.value[..self.cursor_byte()])
+    }
+
+    fn insert(&mut self, character: char) {
+        let byte = self.cursor_byte();
+        self.value.insert(byte, character);
+        self.cursor += 1;
+    }
+
+    fn backspace(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let previous = self.cursor - 1;
+        let start = self
+            .value
+            .char_indices()
+            .nth(previous)
+            .map(|(byte, _)| byte)
+            .unwrap_or(0);
+        let end = self.cursor_byte();
+        self.value.replace_range(start..end, "");
+        self.cursor = previous;
+    }
+
+    fn delete(&mut self) {
+        if self.cursor >= self.char_count() {
+            return;
+        }
+        let start = self.cursor_byte();
+        let end = self
+            .value
+            .char_indices()
+            .nth(self.cursor + 1)
+            .map(|(byte, _)| byte)
+            .unwrap_or(self.value.len());
+        self.value.replace_range(start..end, "");
+    }
+
+    fn delete_word(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let chars: Vec<char> = self.value.chars().collect();
+        let mut start = self.cursor;
+        while start > 0 && chars[start - 1].is_whitespace() {
+            start -= 1;
+        }
+        while start > 0 && !chars[start - 1].is_whitespace() {
+            start -= 1;
+        }
+        let start_byte = self
+            .value
+            .char_indices()
+            .nth(start)
+            .map(|(byte, _)| byte)
+            .unwrap_or(0);
+        let end_byte = self.cursor_byte();
+        self.value.replace_range(start_byte..end_byte, "");
+        self.cursor = start;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionKind {
+    Play,
+    PlayAudio,
+    Download,
+    DownloadAudio,
+    Channel,
+    ToggleSave,
+    CopyUrl,
+    Browser,
+    Refresh,
+    Back,
+}
+
+#[derive(Debug, Clone)]
+pub struct Action {
+    pub kind: ActionKind,
+    pub label: &'static str,
+    pub key: &'static str,
+}
+
+impl Action {
+    fn new(kind: ActionKind, label: &'static str, key: &'static str) -> Self {
+        Self { kind, label, key }
+    }
+}
+
+#[derive(Debug)]
+pub enum Overlay {
+    Search(TextInput),
+    Url(TextInput),
+    Actions { index: usize, actions: Vec<Action> },
+    Help,
+}
+
+#[derive(Debug)]
+pub enum Effect {
+    Play {
+        video: Video,
+        audio: bool,
+    },
+    Download {
+        job_id: u64,
+        video: Video,
+        audio: bool,
+    },
+    Copy(String),
+    OpenUrl(String),
+    EditConfig,
+    OpenDownloads,
+}
+
+#[derive(Debug)]
+pub enum Msg {
+    Feed {
+        id: u64,
+        result: Result<FeedData, String>,
+    },
+    DownloadProgress {
+        id: u64,
+        percent: u8,
+    },
+    DownloadDone {
+        id: u64,
+        ok: bool,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct DownloadView {
+    pub job_id: u64,
+    pub title: String,
+    pub percent: u8,
+    pub audio: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum HomeAction {
+    Search,
+    Remote {
+        title: &'static str,
+        url: &'static str,
+        auth: bool,
+    },
+    Saved,
+    History,
+    Url,
+    Settings,
+    Quit,
+}
+
+pub struct HomeItem {
+    pub key: &'static str,
+    pub title: &'static str,
+    pub description: &'static str,
+    pub action: HomeAction,
+}
+
+pub const HOME_ITEMS: &[HomeItem] = &[
+    HomeItem {
+        key: "/",
+        title: "Search",
+        description: "Find videos on YouTube with quick filters",
+        action: HomeAction::Search,
+    },
+    HomeItem {
+        key: "f",
+        title: "Subscriptions",
+        description: "Latest from channels you follow · cookies",
+        action: HomeAction::Remote {
+            title: "Subscriptions",
+            url: "https://www.youtube.com/feed/subscriptions",
+            auth: true,
+        },
+    },
+    HomeItem {
+        key: "w",
+        title: "Watch Later",
+        description: "Your YouTube Watch Later queue · cookies",
+        action: HomeAction::Remote {
+            title: "Watch Later",
+            url: "https://www.youtube.com/playlist?list=WL",
+            auth: true,
+        },
+    },
+    HomeItem {
+        key: "l",
+        title: "Liked videos",
+        description: "Everything you liked on YouTube · cookies",
+        action: HomeAction::Remote {
+            title: "Liked videos",
+            url: "https://www.youtube.com/playlist?list=LL",
+            auth: true,
+        },
+    },
+    HomeItem {
+        key: "S",
+        title: "Saved videos",
+        description: "Your local Utui collection",
+        action: HomeAction::Saved,
+    },
+    HomeItem {
+        key: "H",
+        title: "History",
+        description: "Recently played on this machine",
+        action: HomeAction::History,
+    },
+    HomeItem {
+        key: "u",
+        title: "Open URL",
+        description: "A video, playlist, channel, or any yt-dlp URL",
+        action: HomeAction::Url,
+    },
+    HomeItem {
+        key: ",",
+        title: "Settings",
+        description: "Player, cookies, downloads, and paths",
+        action: HomeAction::Settings,
+    },
+    HomeItem {
+        key: "q",
+        title: "Quit",
+        description: "Leave Utui",
+        action: HomeAction::Quit,
+    },
+];
+
+pub struct App {
+    pub paths: Paths,
+    pub config: Config,
+    pub store: Store,
+    pub view: View,
+    pub feed: Feed,
+    pub stack: Vec<Feed>,
+    pub overlay: Option<Overlay>,
+    pub table_state: TableState,
+    pub home_index: usize,
+    pub loading: bool,
+    pub loading_label: String,
+    pub download: Option<DownloadView>,
+    pub toast: Option<Toast>,
+    pub quit: bool,
+    pub last_search: Option<String>,
+    fetch_id: u64,
+    download_id: u64,
+    pending_fetch: Option<FetchSpec>,
+    pending_effect: Option<Effect>,
+    started: Instant,
+}
+
+impl App {
+    pub fn new(paths: Paths, config: Config, store: Store) -> Self {
+        Self {
+            paths,
+            config,
+            store,
+            view: View::Home,
+            feed: Feed::empty(),
+            stack: Vec::new(),
+            overlay: None,
+            table_state: TableState::default(),
+            home_index: 0,
+            loading: false,
+            loading_label: String::new(),
+            download: None,
+            toast: None,
+            quit: false,
+            last_search: None,
+            fetch_id: 0,
+            download_id: 0,
+            pending_fetch: None,
+            pending_effect: None,
+            started: Instant::now(),
+        }
+    }
+
+    pub fn take_fetch(&mut self) -> Option<FetchSpec> {
+        self.pending_fetch.take()
+    }
+
+    pub fn take_effect(&mut self) -> Option<Effect> {
+        self.pending_effect.take()
+    }
+
+    pub fn spinner_frame(&self, now: Instant) -> &'static str {
+        const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let index = (now.duration_since(self.started).as_millis() / 80) as usize % FRAMES.len();
+        FRAMES[index]
+    }
+
+    pub fn active_toast(&self, now: Instant) -> Option<&Toast> {
+        self.toast.as_ref().filter(|toast| toast.is_visible(now))
+    }
+
+    pub fn selected_index(&self) -> Option<usize> {
+        self.table_state
+            .selected()
+            .filter(|index| *index < self.feed.items.len())
+    }
+
+    pub fn selected_video(&self) -> Option<&Video> {
+        self.selected_index()
+            .and_then(|index| self.feed.items.get(index))
+    }
+
+    pub fn can_go_back(&self) -> bool {
+        self.view == View::Browse && !self.stack.is_empty()
+    }
+
+    pub fn current_title(&self) -> String {
+        match self.view {
+            View::Home => "Home".to_string(),
+            View::Browse => self.feed.title.clone(),
+            View::Settings => "Settings".to_string(),
+        }
+    }
+
+    pub fn start_search(&mut self, query: &str) -> Result<()> {
+        let resolved = self.store.recall_search(query);
+        let plan = yt::parse_search(&resolved);
+        if plan.term.trim().is_empty() {
+            bail!("Add a search term after the filter");
+        }
+
+        self.store.add_search(&resolved);
+        self.last_search = Some(resolved);
+        self.stack.clear();
+        let subtitle = plan
+            .filter
+            .as_ref()
+            .map(|filter| format!("FILTER  :{filter}  ·  {} requested", self.config.results))
+            .unwrap_or_else(|| format!("{} requested", self.config.results));
+        let title = format!("Search · {}", plan.term);
+        let url = yt::build_search_url(&plan.term, &plan.sp);
+        let _ = self.persist();
+        self.request_feed(url, title, subtitle, FeedKind::Search, false, false, false);
+        Ok(())
+    }
+
+    pub fn start_url(&mut self, input: &str) -> Result<()> {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            bail!("Paste a URL first");
+        }
+        if trimmed.chars().any(char::is_whitespace) && !trimmed.starts_with("ytsearch:") {
+            bail!("That looks like a search query. Press / to search instead");
+        }
+        let url = if trimmed.starts_with("http://")
+            || trimmed.starts_with("https://")
+            || trimmed.starts_with("ytsearch:")
+        {
+            trimmed.to_string()
+        } else {
+            format!("https://{trimmed}")
+        };
+
+        let push = self.view == View::Browse && !self.feed.items.is_empty();
+        let kind = if url.contains("list=") {
+            FeedKind::Playlist
+        } else if url.contains("/channel/") || url.contains("/@") {
+            FeedKind::Channel
+        } else {
+            FeedKind::Remote
+        };
+        self.request_feed(
+            url,
+            "Opening URL".to_string(),
+            kind.label().to_string(),
+            kind,
+            false,
+            push,
+            false,
+        );
+        Ok(())
+    }
+
+    pub fn open_home_item(&mut self, index: usize) {
+        let Some(item) = HOME_ITEMS.get(index) else {
+            return;
+        };
+        match item.action {
+            HomeAction::Search => self.open_search_overlay(),
+            HomeAction::Remote { title, url, auth } => {
+                self.request_feed(
+                    url.to_string(),
+                    title.to_string(),
+                    "YOUTUBE · COOKIES".to_string(),
+                    FeedKind::Remote,
+                    auth,
+                    false,
+                    false,
+                );
+            }
+            HomeAction::Saved => self.show_saved(false),
+            HomeAction::History => self.show_history(false),
+            HomeAction::Url => self.open_url_overlay(),
+            HomeAction::Settings => self.view = View::Settings,
+            HomeAction::Quit => self.quit = true,
+        }
+    }
+
+    pub fn show_saved(&mut self, push: bool) {
+        if push && !self.feed.items.is_empty() {
+            self.stack.push(self.feed.clone());
+        }
+        let items = self.store.saved.clone();
+        self.feed = Feed {
+            title: "Saved videos".to_string(),
+            source: "utui://saved".to_string(),
+            kind: FeedKind::Saved,
+            subtitle: format!("{} VIDEOS", items.len()),
+            notice: if items.is_empty() {
+                Some("Nothing saved yet. Press `s` on a result to keep it here.".to_string())
+            } else {
+                None
+            },
+            items,
+            auth: false,
+            fetched_at: now_unix(),
+        };
+        self.finish_local_feed();
+    }
+
+    pub fn show_history(&mut self, push: bool) {
+        if push && !self.feed.items.is_empty() {
+            self.stack.push(self.feed.clone());
+        }
+        let items: Vec<Video> = self
+            .store
+            .history
+            .iter()
+            .map(|entry| entry.video.clone())
+            .collect();
+        self.feed = Feed {
+            title: "History".to_string(),
+            source: "utui://history".to_string(),
+            kind: FeedKind::History,
+            subtitle: format!("{} VIDEOS", items.len()),
+            notice: if items.is_empty() {
+                Some("Nothing watched yet. Play something and it will appear here.".to_string())
+            } else {
+                None
+            },
+            items,
+            auth: false,
+            fetched_at: now_unix(),
+        };
+        self.finish_local_feed();
+    }
+
+    fn finish_local_feed(&mut self) {
+        self.fetch_id = self.fetch_id.wrapping_add(1);
+        self.pending_fetch = None;
+        self.loading = false;
+        self.view = View::Browse;
+        self.overlay = None;
+        self.reset_selection();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn request_feed(
+        &mut self,
+        url: String,
+        title: String,
+        subtitle: String,
+        kind: FeedKind,
+        requires_auth: bool,
+        push: bool,
+        bypass_cache: bool,
+    ) {
+        if requires_auth && self.config.cookies_browser.is_none() {
+            self.feed = Feed {
+                title,
+                source: url,
+                kind,
+                subtitle,
+                items: Vec::new(),
+                notice: Some(
+                    "This feed needs YouTube cookies. Set `cookies_browser = \"firefox\"` \
+                     (or another browser) in Settings, then press `r`."
+                        .to_string(),
+                ),
+                auth: true,
+                fetched_at: 0,
+            };
+            self.view = View::Browse;
+            self.overlay = None;
+            self.loading = false;
+            self.fetch_id = self.fetch_id.wrapping_add(1);
+            self.pending_fetch = None;
+            self.reset_selection();
+            self.toast_info("Cookie-backed feed: configure cookies_browser first");
+            return;
+        }
+
+        if push && !self.feed.items.is_empty() {
+            self.stack.push(self.feed.clone());
+        }
+
+        self.fetch_id = self.fetch_id.wrapping_add(1);
+        let id = self.fetch_id;
+        self.loading = true;
+        self.loading_label = match kind {
+            FeedKind::Search => "Searching YouTube".to_string(),
+            FeedKind::Channel => "Loading channel".to_string(),
+            FeedKind::Playlist => "Loading playlist".to_string(),
+            _ => "Fetching with yt-dlp".to_string(),
+        };
+        self.feed = Feed {
+            title,
+            source: url.clone(),
+            kind,
+            subtitle,
+            items: Vec::new(),
+            notice: None,
+            auth: requires_auth,
+            fetched_at: 0,
+        };
+        self.view = View::Browse;
+        self.overlay = None;
+        self.reset_selection();
+
+        let mut spec = FetchSpec::new(id, url, self.feed.title.clone());
+        spec.limit = self.config.results;
+        spec.cookies_browser = self.config.cookies_browser.clone();
+        spec.requires_auth = requires_auth;
+        spec.cache_dir = Some(self.paths.feed_cache_dir());
+        spec.bypass_cache = bypass_cache;
+        self.pending_fetch = Some(spec);
+    }
+
+    pub fn handle_key(&mut self, key: KeyEvent) {
+        if key.kind == crossterm::event::KeyEventKind::Release {
+            return;
+        }
+        if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
+            self.quit = true;
+            return;
+        }
+
+        if self.overlay.is_some() {
+            self.handle_overlay_key(key);
+            return;
+        }
+
+        match key.code {
+            KeyCode::Char('?') => {
+                self.overlay = Some(Overlay::Help);
+                return;
+            }
+            KeyCode::Char('/') => {
+                self.open_search_overlay();
+                return;
+            }
+            KeyCode::Char('u') => {
+                self.open_url_overlay();
+                return;
+            }
+            KeyCode::Char('q') => {
+                self.quit = true;
+                return;
+            }
+            _ => {}
+        }
+
+        match self.view {
+            View::Home => self.handle_home_key(key),
+            View::Browse => self.handle_browse_key(key),
+            View::Settings => self.handle_settings_key(key),
+        }
+    }
+
+    fn handle_home_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.home_index = self.home_index.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
+                self.home_index = (self.home_index + 1).min(HOME_ITEMS.len() - 1);
+            }
+            KeyCode::Enter => self.open_home_item(self.home_index),
+            KeyCode::Char('f') => self.open_home_item(1),
+            KeyCode::Char('w') => self.open_home_item(2),
+            KeyCode::Char('l') => self.open_home_item(3),
+            KeyCode::Char('S') => self.open_home_item(4),
+            KeyCode::Char('H') => self.open_home_item(5),
+            KeyCode::Char(',') => self.view = View::Settings,
+            KeyCode::Esc if self.loading => self.cancel_pending_fetch(),
+            _ => {}
+        }
+    }
+
+    fn handle_browse_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
+            KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
+            KeyCode::PageUp => self.move_selection(-10),
+            KeyCode::PageDown => self.move_selection(10),
+            KeyCode::Home | KeyCode::Char('g') => self.select_first(),
+            KeyCode::End | KeyCode::Char('G') => self.select_last(),
+            KeyCode::Enter => self.open_actions(),
+            KeyCode::Char('p') => self.play_selected(false),
+            KeyCode::Char('a') => self.play_selected(true),
+            KeyCode::Char('d') => self.download_selected(false),
+            KeyCode::Char('D') => self.download_selected(true),
+            KeyCode::Char('s') => self.toggle_selected_saved(),
+            KeyCode::Char('c') => self.open_selected_channel(),
+            KeyCode::Char('y') => self.copy_selected_url(),
+            KeyCode::Char('o') => self.open_selected_browser(),
+            KeyCode::Char('r') => self.refresh(),
+            KeyCode::Char('b') | KeyCode::Esc => self.back(),
+            KeyCode::Tab => self.open_actions(),
+            _ => {}
+        }
+    }
+
+    fn handle_settings_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char('e') => self.pending_effect = Some(Effect::EditConfig),
+            KeyCode::Char('o') => self.pending_effect = Some(Effect::OpenDownloads),
+            KeyCode::Char('r') => self.reload_config(),
+            KeyCode::Esc => self.view = View::Home,
+            _ => {}
+        }
+    }
+
+    fn handle_overlay_key(&mut self, key: KeyEvent) {
+        let Some(overlay) = self.overlay.take() else {
+            return;
+        };
+        match overlay {
+            Overlay::Search(mut input) => match key.code {
+                KeyCode::Esc => {}
+                KeyCode::Enter => {
+                    let query = input.value.trim().to_string();
+                    if query.is_empty() {
+                        self.overlay = Some(Overlay::Search(input));
+                        return;
+                    }
+                    if let Err(error) = self.start_search(&query) {
+                        self.toast_error(error.to_string());
+                        self.overlay = Some(Overlay::Search(input));
+                    }
+                }
+                _ => {
+                    input.handle_key(&key);
+                    self.overlay = Some(Overlay::Search(input));
+                }
+            },
+            Overlay::Url(mut input) => match key.code {
+                KeyCode::Esc => {}
+                KeyCode::Enter => {
+                    let url = input.value.trim().to_string();
+                    if url.is_empty() {
+                        self.overlay = Some(Overlay::Url(input));
+                        return;
+                    }
+                    if let Err(error) = self.start_url(&url) {
+                        self.toast_error(error.to_string());
+                        self.overlay = Some(Overlay::Url(input));
+                    }
+                }
+                _ => {
+                    input.handle_key(&key);
+                    self.overlay = Some(Overlay::Url(input));
+                }
+            },
+            Overlay::Actions { mut index, actions } => match key.code {
+                KeyCode::Esc => {}
+                KeyCode::Up | KeyCode::Char('k') => {
+                    index = index.saturating_sub(1);
+                    self.overlay = Some(Overlay::Actions { index, actions });
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    index = (index + 1).min(actions.len().saturating_sub(1));
+                    self.overlay = Some(Overlay::Actions { index, actions });
+                }
+                KeyCode::Enter => {
+                    if let Some(action) = actions.get(index) {
+                        let kind = action.kind;
+                        self.overlay = None;
+                        self.execute_action(kind);
+                    } else {
+                        self.overlay = None;
+                    }
+                }
+                KeyCode::Char(character) => {
+                    if let Some(action) = actions
+                        .iter()
+                        .find(|action| action.key.starts_with(character))
+                    {
+                        let kind = action.kind;
+                        self.overlay = None;
+                        self.execute_action(kind);
+                    } else {
+                        self.overlay = Some(Overlay::Actions { index, actions });
+                    }
+                }
+                _ => {
+                    self.overlay = Some(Overlay::Actions { index, actions });
+                }
+            },
+            Overlay::Help => match key.code {
+                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') | KeyCode::Enter => {}
+                _ => self.overlay = Some(Overlay::Help),
+            },
+        }
+    }
+
+    fn execute_action(&mut self, kind: ActionKind) {
+        match kind {
+            ActionKind::Play => self.play_selected(false),
+            ActionKind::PlayAudio => self.play_selected(true),
+            ActionKind::Download => self.download_selected(false),
+            ActionKind::DownloadAudio => self.download_selected(true),
+            ActionKind::Channel => self.open_selected_channel(),
+            ActionKind::ToggleSave => self.toggle_selected_saved(),
+            ActionKind::CopyUrl => self.copy_selected_url(),
+            ActionKind::Browser => self.open_selected_browser(),
+            ActionKind::Refresh => self.refresh(),
+            ActionKind::Back => self.back(),
+        }
+    }
+
+    pub fn open_actions(&mut self) {
+        let Some(video) = self.selected_video().cloned() else {
+            self.toast_info("Nothing selected");
+            return;
+        };
+        let actions = build_actions(&video, self.store.is_saved(&video.id));
+        if actions.is_empty() {
+            return;
+        }
+        self.overlay = Some(Overlay::Actions { index: 0, actions });
+    }
+
+    fn play_selected(&mut self, audio: bool) {
+        let Some(video) = self.selected_video().cloned() else {
+            return;
+        };
+        self.record_watch(&video);
+        self.pending_effect = Some(Effect::Play { video, audio });
+    }
+
+    fn download_selected(&mut self, audio: bool) {
+        if self.download.is_some() {
+            self.toast_error("A download is already running");
+            return;
+        }
+        let Some(video) = self.selected_video().cloned() else {
+            return;
+        };
+        self.record_watch(&video);
+        let job_id = self.begin_download(&video, audio);
+        self.pending_effect = Some(Effect::Download {
+            job_id,
+            video,
+            audio,
+        });
+        self.toast_info(if audio {
+            "Downloading audio…"
+        } else {
+            "Downloading video…"
+        });
+    }
+
+    fn toggle_selected_saved(&mut self) {
+        let Some(video) = self.selected_video().cloned() else {
+            return;
+        };
+        let saved = self.store.toggle_saved(&video);
+        let _ = self.persist();
+        if self.feed.kind == FeedKind::Saved && !saved {
+            if let Some(position) = self.feed.items.iter().position(|item| item.id == video.id) {
+                self.feed.items.remove(position);
+                self.feed.subtitle = format!("{} VIDEOS", self.feed.items.len());
+                if self.feed.items.is_empty() {
+                    self.feed.notice = Some(
+                        "Nothing saved yet. Press `s` on a result to keep it here.".to_string(),
+                    );
+                }
+                self.fix_selection_after_removal();
+            }
+        }
+        if saved {
+            self.toast_success("Saved to your collection");
+        } else {
+            self.toast_info("Removed from saved videos");
+        }
+    }
+
+    fn open_selected_channel(&mut self) {
+        let Some(video) = self.selected_video().cloned() else {
+            return;
+        };
+        let Some(channel_url) = video.channel_url else {
+            self.toast_error("No channel URL attached to this video");
+            return;
+        };
+        let mut url = channel_url.trim_end_matches('/').to_string();
+        if !url.ends_with("/videos") {
+            url.push_str("/videos");
+        }
+        self.request_feed(
+            url,
+            format!("Channel · {}", video.channel),
+            "CHANNEL VIDEOS".to_string(),
+            FeedKind::Channel,
+            false,
+            true,
+            false,
+        );
+    }
+
+    fn copy_selected_url(&mut self) {
+        let Some(video) = self.selected_video() else {
+            return;
+        };
+        self.pending_effect = Some(Effect::Copy(video.url.clone()));
+    }
+
+    fn open_selected_browser(&mut self) {
+        let Some(video) = self.selected_video() else {
+            return;
+        };
+        self.pending_effect = Some(Effect::OpenUrl(video.url.clone()));
+    }
+
+    fn move_selection(&mut self, delta: isize) {
+        if self.feed.items.is_empty() {
+            self.table_state.select(None);
+            return;
+        }
+        let last = self.feed.items.len() - 1;
+        let current = self.table_state.selected().unwrap_or(0);
+        let next = if delta < 0 {
+            current.saturating_sub(delta.unsigned_abs())
+        } else {
+            (current + delta as usize).min(last)
+        };
+        self.table_state.select(Some(next));
+    }
+
+    fn select_first(&mut self) {
+        if !self.feed.items.is_empty() {
+            self.table_state.select(Some(0));
+        }
+    }
+
+    fn select_last(&mut self) {
+        if !self.feed.items.is_empty() {
+            self.table_state.select(Some(self.feed.items.len() - 1));
+        }
+    }
+
+    fn reset_selection(&mut self) {
+        if self.feed.items.is_empty() {
+            self.table_state.select(None);
+        } else {
+            self.table_state.select(Some(0));
+        }
+    }
+
+    fn fix_selection_after_removal(&mut self) {
+        if self.feed.items.is_empty() {
+            self.table_state.select(None);
+            return;
+        }
+        let last = self.feed.items.len() - 1;
+        let selected = self.table_state.selected().unwrap_or(0).min(last);
+        self.table_state.select(Some(selected));
+    }
+
+    fn refresh(&mut self) {
+        match self.feed.kind {
+            FeedKind::Saved => {
+                self.show_saved(false);
+                self.toast_info("Library refreshed");
+            }
+            FeedKind::History => {
+                self.show_history(false);
+                self.toast_info("History refreshed");
+            }
+            _ => {
+                if self.feed.source.is_empty() {
+                    return;
+                }
+                let url = self.feed.source.clone();
+                let title = self.feed.title.clone();
+                let subtitle = self.feed.subtitle.clone();
+                let kind = self.feed.kind;
+                let auth = self.feed.auth;
+                self.request_feed(url, title, subtitle, kind, auth, false, true);
+            }
+        }
+    }
+
+    fn back(&mut self) {
+        self.cancel_pending_fetch();
+        if let Some(feed) = self.stack.pop() {
+            self.feed = feed;
+            self.view = View::Browse;
+            self.overlay = None;
+            self.reset_selection();
+        } else {
+            self.view = View::Home;
+            self.feed = Feed::empty();
+            self.overlay = None;
+            self.table_state.select(None);
+        }
+    }
+
+    fn cancel_pending_fetch(&mut self) {
+        self.fetch_id = self.fetch_id.wrapping_add(1);
+        self.pending_fetch = None;
+        self.loading = false;
+    }
+
+    pub fn handle_msg(&mut self, message: Msg) {
+        match message {
+            Msg::Feed { id, result } => {
+                if id != self.fetch_id {
+                    return;
+                }
+                self.loading = false;
+                match result {
+                    Ok(data) => {
+                        self.feed.title = if matches!(self.feed.kind, FeedKind::Search) {
+                            self.feed.title.clone()
+                        } else {
+                            data.title.clone()
+                        };
+                        self.feed.subtitle = format!(
+                            "{}  ·  {} RESULTS",
+                            self.feed.kind.label(),
+                            data.items.len()
+                        );
+                        self.feed.notice = if data.items.is_empty() {
+                            Some(
+                                "No items returned. Try a different query or refresh with `r`."
+                                    .to_string(),
+                            )
+                        } else {
+                            None
+                        };
+                        self.feed.items = data.items;
+                        self.feed.fetched_at = data.fetched_at;
+                        self.reset_selection();
+                    }
+                    Err(error) => {
+                        self.feed.notice = Some(error.clone());
+                        self.toast_error(error);
+                    }
+                }
+            }
+            Msg::DownloadProgress { id, percent } => self.update_download_percent(id, percent),
+            Msg::DownloadDone { id, ok, message } => self.finish_download(id, ok, message),
+        }
+    }
+
+    pub fn begin_download(&mut self, video: &Video, audio: bool) -> u64 {
+        self.download_id = self.download_id.wrapping_add(1);
+        let job_id = self.download_id;
+        self.download = Some(DownloadView {
+            job_id,
+            title: video.title.clone(),
+            percent: 0,
+            audio,
+        });
+        job_id
+    }
+
+    pub fn record_watch(&mut self, video: &Video) {
+        self.store.record_watch(video);
+        let _ = self.persist();
+    }
+
+    pub fn persist(&self) -> Result<()> {
+        self.store.save(&self.paths.state_file())
+    }
+
+    pub fn toast_info(&mut self, message: impl Into<String>) {
+        self.set_toast(message, ToastKind::Info);
+    }
+
+    pub fn toast_success(&mut self, message: impl Into<String>) {
+        self.set_toast(message, ToastKind::Success);
+    }
+
+    pub fn toast_error(&mut self, message: impl Into<String>) {
+        self.set_toast(message, ToastKind::Error);
+    }
+
+    fn set_toast(&mut self, message: impl Into<String>, kind: ToastKind) {
+        self.toast = Some(Toast {
+            text: message.into(),
+            kind,
+            created: Instant::now(),
+        });
+    }
+
+    pub fn reload_config(&mut self) {
+        match Config::load(&self.paths) {
+            Ok(config) => {
+                self.config = config;
+                self.toast_success("Configuration reloaded");
+            }
+            Err(error) => self.toast_error(format!("Config reload failed: {error}")),
+        }
+    }
+
+    pub fn open_search_overlay(&mut self) {
+        self.overlay = Some(Overlay::Search(TextInput::default()));
+    }
+
+    pub fn open_url_overlay(&mut self) {
+        self.overlay = Some(Overlay::Url(TextInput::default()));
+    }
+
+    pub fn copy_url(&mut self, url: &str) {
+        match copy_to_clipboard(url) {
+            Ok(()) => self.toast_success("URL copied to clipboard"),
+            Err(error) => self.toast_error(error.to_string()),
+        }
+    }
+
+    pub fn update_download_percent(&mut self, job_id: u64, percent: u8) {
+        if let Some(download) = self.download.as_mut() {
+            if download.job_id == job_id {
+                download.percent = percent;
+            }
+        }
+    }
+
+    pub fn finish_download(&mut self, job_id: u64, ok: bool, message: String) {
+        if self
+            .download
+            .as_ref()
+            .map(|download| download.job_id == job_id)
+            .unwrap_or(false)
+        {
+            self.download = None;
+        }
+        if ok {
+            self.toast_success(message);
+        } else {
+            self.toast_error(message);
+        }
+    }
+
+    pub fn status_line(&self) -> String {
+        if let Some(download) = &self.download {
+            let kind = if download.audio { "audio" } else { "video" };
+            return format!(
+                "↓ {} {}%  {}",
+                kind,
+                download.percent,
+                truncate(&download.title, 42)
+            );
+        }
+        format!(
+            "{} saved · {} history · {} searches",
+            self.store.saved.len(),
+            self.store.history.len(),
+            self.store.search_history.len()
+        )
+    }
+}
+
+fn build_actions(video: &Video, saved: bool) -> Vec<Action> {
+    let mut actions = vec![
+        Action::new(ActionKind::Play, "Play video", "p"),
+        Action::new(ActionKind::PlayAudio, "Play audio only", "a"),
+        Action::new(ActionKind::Download, "Download video", "d"),
+        Action::new(ActionKind::DownloadAudio, "Download audio", "D"),
+    ];
+    if video.channel_url.is_some() {
+        actions.push(Action::new(ActionKind::Channel, "Open channel", "c"));
+    }
+    actions.push(Action::new(
+        ActionKind::ToggleSave,
+        if saved {
+            "Remove from saved"
+        } else {
+            "Save video"
+        },
+        "s",
+    ));
+    actions.push(Action::new(ActionKind::CopyUrl, "Copy URL", "y"));
+    actions.push(Action::new(ActionKind::Browser, "Open in browser", "o"));
+    actions.push(Action::new(ActionKind::Refresh, "Refresh feed", "r"));
+    actions.push(Action::new(ActionKind::Back, "Back", "b"));
+    actions
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn text_input_handles_wide_characters() {
+        let mut input = TextInput::default();
+        for character in "aé日".chars() {
+            input.handle_key(&key(KeyCode::Char(character)));
+        }
+        assert_eq!(input.value, "aé日");
+        assert_eq!(input.cursor, 3);
+        input.handle_key(&key(KeyCode::Backspace));
+        assert_eq!(input.value, "aé");
+        input.handle_key(&key(KeyCode::Home));
+        input.handle_key(&key(KeyCode::Delete));
+        assert_eq!(input.value, "é");
+    }
+
+    #[test]
+    fn text_input_deletes_word() {
+        let mut input = TextInput {
+            value: "rust programming".to_string(),
+            cursor: 16,
+        };
+        input.handle_key(&KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert_eq!(input.value, "rust ");
+    }
+}
