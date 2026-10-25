@@ -1,6 +1,6 @@
 use crate::config::{Config, Paths};
 use crate::store::Store;
-use crate::util::{copy_to_clipboard, now_unix, truncate};
+use crate::util::{copy_to_clipboard, now_unix};
 use crate::yt::{self, FeedData, FetchSpec, Video};
 use anyhow::{bail, Result};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -1221,24 +1221,6 @@ impl App {
         } else {
             self.toast_error(message);
         }
-    }
-
-    pub fn status_line(&self) -> String {
-        if let Some(download) = &self.download {
-            let kind = if download.audio { "audio" } else { "video" };
-            return format!(
-                "↓ {} {}%  {}",
-                kind,
-                download.percent,
-                truncate(&download.title, 42)
-            );
-        }
-        format!(
-            "{} saved · {} history · {} searches",
-            self.store.saved.len(),
-            self.store.history.len(),
-            self.store.search_history.len()
-        )
     }
 }
 

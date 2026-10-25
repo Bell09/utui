@@ -132,10 +132,6 @@ impl Config {
         }
     }
 
-    pub fn cookies_enabled(&self) -> bool {
-        self.cookies_browser.is_some()
-    }
-
     pub fn download_video_dir(&self) -> PathBuf {
         self.download_dir.join("video")
     }
