@@ -469,7 +469,6 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
             ("↑↓", "move"),
             ("enter", "open"),
             ("/", "search"),
-            ("u", "url"),
             ("?", "help"),
             ("q", "quit"),
         ],
@@ -533,14 +532,13 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
 
 fn draw_overlay(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
     match overlay {
-        Overlay::Search(input) => draw_prompt(frame, area, input, "/ "),
-        Overlay::Url(input) => draw_prompt(frame, area, input, "> "),
+        Overlay::Search(input) => draw_prompt(frame, area, input),
         Overlay::Actions { index, actions } => draw_actions(frame, area, app, *index, actions),
         Overlay::Help => draw_help(frame, area),
     }
 }
 
-fn draw_prompt(frame: &mut Frame, area: Rect, input: &TextInput, prefix: &str) {
+fn draw_prompt(frame: &mut Frame, area: Rect, input: &TextInput) {
     if area.height == 0 {
         return;
     }
@@ -548,6 +546,7 @@ fn draw_prompt(frame: &mut Frame, area: Rect, input: &TextInput, prefix: &str) {
     let rect = Rect::new(area.x, area.y, area.width, height);
     frame.render_widget(Clear, rect);
 
+    let prefix = "/ ";
     let prefix_width = prefix.chars().count() as u16;
     let mut spans = vec![
         Span::styled(
@@ -576,15 +575,14 @@ fn draw_prompt(frame: &mut Frame, area: Rect, input: &TextInput, prefix: &str) {
     );
 
     if rect.height > 1 {
-        let hint = if prefix.starts_with('/') {
+        let hint = if crate::app::App::looks_like_url(&input.value) {
+            "enter opens this url  ·  esc cancel".to_string()
+        } else {
             match yt::parse_search(&input.value).filter {
                 Some(filter) => format!("filter :{filter}  ·  enter search  ·  esc cancel"),
-                None => {
-                    "filters  :today  :week  :4k  :hd  :live  :short  :newest  :views".to_string()
-                }
+                None => "paste a url to open  ·  filters  :today  :week  :4k  :hd  :live  :short"
+                    .to_string(),
             }
-        } else {
-            "video, playlist, channel, or any yt-dlp URL  ·  enter open  ·  esc cancel".to_string()
         };
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
@@ -651,7 +649,11 @@ fn draw_help(frame: &mut Frame, area: Rect) {
 
     let lines = vec![
         section("global"),
-        hint_line(&[("/", "search"), ("u", "url"), ("?", "help"), ("q", "quit")]),
+        hint_line(&[("/", "search"), ("?", "help"), ("q", "quit")]),
+        Line::from(Span::styled(
+            "search accepts queries, colon filters, and plain URLs",
+            Style::default().fg(MUTED),
+        )),
         Line::from(""),
         section("browse"),
         hint_line(&[

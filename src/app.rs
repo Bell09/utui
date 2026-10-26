@@ -266,7 +266,6 @@ impl Action {
 #[derive(Debug)]
 pub enum Overlay {
     Search(TextInput),
-    Url(TextInput),
     Actions { index: usize, actions: Vec<Action> },
     Help,
 }
@@ -358,7 +357,6 @@ pub enum HomeAction {
     },
     Saved,
     History,
-    Url,
     Settings,
     Quit,
 }
@@ -412,12 +410,6 @@ pub const HOME_ITEMS: &[HomeItem] = &[
         title: "History",
         description: "Recently played on this machine",
         action: HomeAction::History,
-    },
-    HomeItem {
-        key: "u",
-        title: "Open URL",
-        description: "A video, playlist, channel, or any yt-dlp URL",
-        action: HomeAction::Url,
     },
     HomeItem {
         key: ",",
@@ -628,6 +620,19 @@ impl App {
         Ok(())
     }
 
+    /// True when search-prompt input should be treated as a URL instead of a
+    /// query: explicit schemes, `ytsearch:`, or a single token containing a dot.
+    pub fn looks_like_url(input: &str) -> bool {
+        let lower = input.to_lowercase();
+        if lower.starts_with("http://")
+            || lower.starts_with("https://")
+            || lower.starts_with("ytsearch:")
+        {
+            return true;
+        }
+        !input.chars().any(char::is_whitespace) && input.contains('.')
+    }
+
     pub fn open_home_item(&mut self, index: usize) {
         let Some(item) = HOME_ITEMS.get(index) else {
             return;
@@ -646,7 +651,6 @@ impl App {
             }
             HomeAction::Saved => self.show_saved(false),
             HomeAction::History => self.show_history(false),
-            HomeAction::Url => self.open_url_overlay(),
             HomeAction::Settings => self.view = View::Settings,
             HomeAction::Quit => self.quit = true,
         }
@@ -812,10 +816,6 @@ impl App {
                 self.open_search_overlay();
                 return;
             }
-            KeyCode::Char('u') => {
-                self.open_url_overlay();
-                return;
-            }
             KeyCode::Char('q') => {
                 self.quit = true;
                 return;
@@ -844,7 +844,6 @@ impl App {
             KeyCode::Char('l') => self.open_home_item_by_key("l"),
             KeyCode::Char('S') => self.open_home_item_by_key("S"),
             KeyCode::Char('H') => self.open_home_item_by_key("H"),
-            KeyCode::Char('u') => self.open_home_item_by_key("u"),
             KeyCode::Char(',') => self.view = View::Settings,
             KeyCode::Esc if self.loading => self.cancel_pending_fetch(),
             _ => {}
@@ -898,7 +897,12 @@ impl App {
                         self.overlay = Some(Overlay::Search(input));
                         return;
                     }
-                    if let Err(error) = self.start_search(&query) {
+                    let outcome = if Self::looks_like_url(&query) {
+                        self.start_url(&query)
+                    } else {
+                        self.start_search(&query)
+                    };
+                    if let Err(error) = outcome {
                         self.toast_error(error.to_string());
                         self.overlay = Some(Overlay::Search(input));
                     }
@@ -906,24 +910,6 @@ impl App {
                 _ => {
                     input.handle_key(&key);
                     self.overlay = Some(Overlay::Search(input));
-                }
-            },
-            Overlay::Url(mut input) => match key.code {
-                KeyCode::Esc => {}
-                KeyCode::Enter => {
-                    let url = input.value.trim().to_string();
-                    if url.is_empty() {
-                        self.overlay = Some(Overlay::Url(input));
-                        return;
-                    }
-                    if let Err(error) = self.start_url(&url) {
-                        self.toast_error(error.to_string());
-                        self.overlay = Some(Overlay::Url(input));
-                    }
-                }
-                _ => {
-                    input.handle_key(&key);
-                    self.overlay = Some(Overlay::Url(input));
                 }
             },
             Overlay::Actions { mut index, actions } => match key.code {
@@ -1296,10 +1282,6 @@ impl App {
 
     pub fn open_search_overlay(&mut self) {
         self.overlay = Some(Overlay::Search(TextInput::default()));
-    }
-
-    pub fn open_url_overlay(&mut self) {
-        self.overlay = Some(Overlay::Url(TextInput::default()));
     }
 
     pub fn copy_url(&mut self, url: &str) {

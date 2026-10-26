@@ -292,8 +292,6 @@ async fn run_tui(app: &mut App) -> Result<()> {
 fn handle_paste(app: &mut App, text: &str) {
     if let Some(app::Overlay::Search(input)) = app.overlay.as_mut() {
         input.insert_str(text);
-    } else if let Some(app::Overlay::Url(input)) = app.overlay.as_mut() {
-        input.insert_str(text);
     }
 }
 

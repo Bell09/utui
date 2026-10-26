@@ -103,8 +103,7 @@ Cookies are used only by the `yt-dlp` subprocess. Utui never reads or stores the
 
 | Key | Action |
 | --- | --- |
-| `/` | Search |
-| `u` | Open URL |
+| `/` | Search (accepts queries, colon filters, and plain URLs) |
 | `?` | Keybindings help |
 | `q` | Quit |
 | `Ctrl+C` | Quit |
