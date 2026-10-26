@@ -4,20 +4,11 @@
 
 It reimplements the `yt-x` workflow as a single native binary: no shell script, no `fzf`, no `jq`, no pipeline juggling. `yt-dlp` does extraction, `mpv` does playback, and a ratatui interface keeps the whole flow fast and keyboard-first.
 
-```
-██╗   ██╗████████╗██╗   ██╗██╗
-██║   ██║╚══██╔══╝██║   ██║██║
-██║   ██║   ██║   ██║   ██║██║
-██║   ██║   ██║   ██║   ██║██║
-╚██╗ ██╔╝   ██║   ╚██████╔╝██║
- ╚████╔╝    ██║    ╚═════╝ ╚═╝
-  ╚═══╝     ╚═╝
-```
-
 ## Features
 
-- **Native TUI** — ratatui + crossterm, true-color dark theme, no external launcher.
+- **Native TUI** — ratatui + crossterm with a minimal, terminal-default palette and a single accent color. No external launcher.
 - **Fast search** — one `yt-dlp --flat-playlist --dump-single-json` call, parsed in-process and cached for 10 minutes.
+- **Thumbnails** — the selected video's thumbnail renders in the details pane using kitty, sixel, or iTerm2 graphics when the terminal supports them, with unicode half-blocks as fallback. Downloads are cached in `~/.cache/utui/thumbs`.
 - **Search filters** — YouTube's colon syntax: `:today`, `:week`, `:4k`, `:hd`, `:live`, `:short`, `:newest`, `:views`, and more.
 - **Search recall** — `!1`, `!2`, … replay previous searches.
 - **Channels and playlists** — open a channel from any result or paste any yt-dlp URL.
@@ -26,7 +17,7 @@ It reimplements the `yt-x` workflow as a single native binary: no shell script, 
 - **Library** — locally saved videos and watch history, stored as JSON.
 - **Cookie-backed feeds** — Subscriptions, Watch Later, and Liked videos via `yt-dlp --cookies-from-browser`.
 - **Scriptable** — `--json` gives clean machine-readable output for scripts and pipelines.
-- **Small and fast** — release builds use LTO, one codegen unit, and no runtime HTTP client.
+- **Small and fast** — release builds use LTO and a single codegen unit. The only HTTP traffic is thumbnail downloads from YouTube's image CDN.
 
 ## Requirements
 
@@ -37,7 +28,7 @@ It reimplements the `yt-x` workflow as a single native binary: no shell script, 
 | `ffmpeg` | Merge video/audio and create MP3 downloads |
 | `wl-clipboard`, `xclip`, or `xsel` | Optional, for `y` copy URL |
 
-Rust 1.82 or newer is required to build.
+Rust 1.86 or newer is required to build.
 
 ## Install
 
@@ -187,7 +178,7 @@ download_dir = "/home/you/Videos/utui"
 # cookies_browser = "firefox"
 ```
 
-State lives in `~/.local/share/utui/state.json`. Feed cache lives in `~/.cache/utui/feeds`.
+State lives in `~/.local/share/utui/state.json`. Feed cache lives in `~/.cache/utui/feeds` and thumbnail cache in `~/.cache/utui/thumbs`.
 
 ## How it compares to yt-x
 
@@ -201,7 +192,7 @@ What is different:
 - **Ten-minute feed cache.** Repeating a search or opening a channel again is instant until the cache expires.
 - **Headless JSON mode.** Useful for scripts and for testing behavior without a terminal.
 
-Not implemented yet: rofi launcher mode, terminal image previews, auto-mix playlists, custom user extensions, and multi-language UI strings.
+Not implemented yet: rofi launcher mode, auto-mix playlists, custom user extensions, and multi-language UI strings.
 
 ## Development
 

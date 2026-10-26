@@ -18,6 +18,7 @@ pub fn picker() -> Picker {
 
 /// A picker that always uses unicode half-blocks. Used by tests and any
 /// headless path that cannot query the terminal.
+#[cfg(test)]
 pub fn halfblocks_picker() -> Picker {
     Picker::halfblocks()
 }

@@ -383,7 +383,6 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
         truncate(&video.url, inner.width.saturating_sub(2) as usize),
         Style::default().fg(MUTED),
     )));
-    lines.push(Line::from(""));
 
     frame.render_widget(
         Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
