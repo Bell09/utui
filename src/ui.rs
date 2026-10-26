@@ -1,6 +1,8 @@
 use crate::app::{Action, App, Overlay, TextInput, ThumbnailState, ToastKind, View, HOME_ITEMS};
 use crate::theme::*;
-use crate::util::{format_date, format_duration, format_views, relative_time, truncate};
+use crate::util::{
+    display_width, format_date, format_duration, format_views, relative_time, truncate,
+};
 use crate::yt::{self, Video};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -546,15 +548,30 @@ fn draw_prompt(frame: &mut Frame, area: Rect, input: &TextInput, prefix: &str) {
     let rect = Rect::new(area.x, area.y, area.width, height);
     frame.render_widget(Clear, rect);
 
-    let line = Line::from(vec![
+    let prefix_width = prefix.chars().count() as u16;
+    let mut spans = vec![
         Span::styled(
             prefix.to_string(),
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(input.value.clone(), Style::default().fg(TEXT)),
-    ]);
+        Span::styled(
+            input.value.clone(),
+            Style::default().fg(TEXT).add_modifier(Modifier::UNDERLINED),
+        ),
+    ];
+    // Extend the underline across the row so the input reads as a field.
+    let filler = rect
+        .width
+        .saturating_sub(prefix_width)
+        .saturating_sub(display_width(&input.value) as u16);
+    if filler > 0 {
+        spans.push(Span::styled(
+            " ".repeat(filler as usize),
+            Style::default().add_modifier(Modifier::UNDERLINED),
+        ));
+    }
     frame.render_widget(
-        Paragraph::new(line),
+        Paragraph::new(Line::from(spans)),
         Rect::new(rect.x, rect.y, rect.width, 1),
     );
 
@@ -580,7 +597,7 @@ fn draw_prompt(frame: &mut Frame, area: Rect, input: &TextInput, prefix: &str) {
 
     let cursor_x = rect
         .x
-        .saturating_add(prefix.chars().count() as u16)
+        .saturating_add(prefix_width)
         .saturating_add(input.cursor_width() as u16)
         .min(rect.right().saturating_sub(1));
     frame.set_cursor_position((cursor_x, rect.y));

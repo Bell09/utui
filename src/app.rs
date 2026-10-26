@@ -351,7 +351,6 @@ pub struct DownloadView {
 
 #[derive(Debug, Clone, Copy)]
 pub enum HomeAction {
-    Search,
     Remote {
         title: &'static str,
         url: &'static str,
@@ -372,12 +371,6 @@ pub struct HomeItem {
 }
 
 pub const HOME_ITEMS: &[HomeItem] = &[
-    HomeItem {
-        key: "/",
-        title: "Search",
-        description: "Find videos on YouTube with quick filters",
-        action: HomeAction::Search,
-    },
     HomeItem {
         key: "f",
         title: "Subscriptions",
@@ -640,7 +633,6 @@ impl App {
             return;
         };
         match item.action {
-            HomeAction::Search => self.open_search_overlay(),
             HomeAction::Remote { title, url, auth } => {
                 self.request_feed(
                     url.to_string(),
@@ -657,6 +649,13 @@ impl App {
             HomeAction::Url => self.open_url_overlay(),
             HomeAction::Settings => self.view = View::Settings,
             HomeAction::Quit => self.quit = true,
+        }
+    }
+
+    /// Open a home entry by its key letter, so shortcuts never depend on list order.
+    fn open_home_item_by_key(&mut self, key: &str) {
+        if let Some(index) = HOME_ITEMS.iter().position(|item| item.key == key) {
+            self.open_home_item(index);
         }
     }
 
@@ -840,11 +839,12 @@ impl App {
                 self.home_index = (self.home_index + 1).min(HOME_ITEMS.len() - 1);
             }
             KeyCode::Enter => self.open_home_item(self.home_index),
-            KeyCode::Char('f') => self.open_home_item(1),
-            KeyCode::Char('w') => self.open_home_item(2),
-            KeyCode::Char('l') => self.open_home_item(3),
-            KeyCode::Char('S') => self.open_home_item(4),
-            KeyCode::Char('H') => self.open_home_item(5),
+            KeyCode::Char('f') => self.open_home_item_by_key("f"),
+            KeyCode::Char('w') => self.open_home_item_by_key("w"),
+            KeyCode::Char('l') => self.open_home_item_by_key("l"),
+            KeyCode::Char('S') => self.open_home_item_by_key("S"),
+            KeyCode::Char('H') => self.open_home_item_by_key("H"),
+            KeyCode::Char('u') => self.open_home_item_by_key("u"),
             KeyCode::Char(',') => self.view = View::Settings,
             KeyCode::Esc if self.loading => self.cancel_pending_fetch(),
             _ => {}
