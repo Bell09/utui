@@ -27,7 +27,12 @@ impl Paths {
     }
 
     pub fn ensure(&self) -> Result<()> {
-        for dir in [&self.config_dir, &self.data_dir, &self.cache_dir] {
+        for dir in [
+            &self.config_dir,
+            &self.data_dir,
+            &self.cache_dir,
+            &self.thumb_cache_dir(),
+        ] {
             fs::create_dir_all(dir)
                 .with_context(|| format!("could not create directory {}", dir.display()))?;
         }
@@ -44,6 +49,25 @@ impl Paths {
 
     pub fn feed_cache_dir(&self) -> PathBuf {
         self.cache_dir.join("feeds")
+    }
+
+    pub fn thumb_cache_dir(&self) -> PathBuf {
+        self.cache_dir.join("thumbs")
+    }
+
+    /// Cached thumbnail file for a video id.
+    pub fn thumbnail_file(&self, id: &str) -> PathBuf {
+        let safe: String = id
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                    character
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        self.thumb_cache_dir().join(format!("{safe}.img"))
     }
 }
 

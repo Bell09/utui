@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod store;
 mod theme;
+mod thumb;
 mod ui;
 mod util;
 mod yt;
@@ -153,12 +154,12 @@ async fn run_json(cli: &Cli, config: &Config, paths: &config::Paths) -> Result<(
 async fn run_tui(app: &mut App) -> Result<()> {
     let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
     let mut terminal = ratatui::init();
+    app.set_picker(thumb::picker());
     let mut active_fetch: Option<JoinHandle<()>> = None;
+    let mut active_thumb: Option<JoinHandle<()>> = None;
 
     let result: Result<()> = async {
         loop {
-            terminal.draw(|frame| ui::draw(frame, app, Instant::now()))?;
-
             if event::poll(Duration::from_millis(35))? {
                 match event::read()? {
                     Event::Key(key) => app.handle_key(key),
@@ -190,6 +191,7 @@ async fn run_tui(app: &mut App) -> Result<()> {
                         let outcome = play_media(&app.config, &video, audio);
                         terminal = ratatui::init();
                         terminal.clear()?;
+                        app.clear_thumbnail();
                         match outcome {
                             Ok(()) => app.toast_info(format!("Finished · {}", video.title)),
                             Err(error) => app.toast_error(error.to_string()),
@@ -225,6 +227,7 @@ async fn run_tui(app: &mut App) -> Result<()> {
                         let outcome = edit_config(&app.paths.config_file());
                         terminal = ratatui::init();
                         terminal.clear()?;
+                        app.clear_thumbnail();
                         match outcome {
                             Ok(()) => {
                                 app.reload_config();
@@ -251,6 +254,25 @@ async fn run_tui(app: &mut App) -> Result<()> {
                     }
                 }
             }
+
+            app.sync_thumbnail();
+            if let Some(spec) = app.take_thumbnail() {
+                if let Some(handle) = active_thumb.take() {
+                    handle.abort();
+                }
+                let tx = tx.clone();
+                active_thumb = Some(tokio::spawn(async move {
+                    let result = thumb::load(&spec.url, &spec.path)
+                        .await
+                        .map_err(|error| error.to_string());
+                    let _ = tx.send(Msg::Thumbnail {
+                        id: spec.id,
+                        result,
+                    });
+                }));
+            }
+
+            terminal.draw(|frame| ui::draw(frame, app, Instant::now()))?;
 
             if app.quit {
                 break;

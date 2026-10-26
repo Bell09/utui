@@ -1,4 +1,4 @@
-use crate::app::{Action, App, Overlay, TextInput, ToastKind, View, HOME_ITEMS};
+use crate::app::{Action, App, Overlay, TextInput, ThumbnailState, ToastKind, View, HOME_ITEMS};
 use crate::theme::*;
 use crate::util::{format_date, format_duration, format_views, relative_time, truncate};
 use crate::yt::{self, Video};
@@ -9,6 +9,7 @@ use ratatui::widgets::{
     Block, Cell, Clear, List, ListItem, ListState, Padding, Paragraph, Row, Table, Wrap,
 };
 use ratatui::Frame;
+use ratatui_image::StatefulImage;
 use std::time::Instant;
 
 pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
@@ -296,10 +297,35 @@ fn draw_empty(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     );
 }
 
-fn draw_details(frame: &mut Frame, area: Rect, app: &App, video: &Video) {
+fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
     let inner = Block::default()
         .padding(Padding::new(2, 0, 0, 0))
         .inner(area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let mut body = inner;
+    if video.thumbnail.is_some() {
+        let rows = thumbnail_rows(app, inner);
+        if rows > 0 {
+            let thumb_area = Rect::new(inner.x, inner.y, inner.width, rows);
+            if let ThumbnailState::Ready { id, protocol } = &mut app.thumbnail {
+                if id == &video.id {
+                    frame.render_stateful_widget(StatefulImage::new(), thumb_area, protocol);
+                }
+            }
+            body = Rect::new(
+                inner.x,
+                inner.y + rows + 1,
+                inner.width,
+                inner.height.saturating_sub(rows + 1),
+            );
+        }
+    }
+    if body.height == 0 {
+        return;
+    }
 
     let mut lines = Vec::new();
     if video.is_live() {
@@ -358,32 +384,31 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &App, video: &Video) {
         Style::default().fg(MUTED),
     )));
     lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        key("p"),
-        Span::styled(" play  ", Style::default().fg(MUTED)),
-        key("a"),
-        Span::styled(" audio  ", Style::default().fg(MUTED)),
-        key("d"),
-        Span::styled(" download  ", Style::default().fg(MUTED)),
-        key("s"),
-        Span::styled(
-            if app.store.is_saved(&video.id) {
-                " unsave  "
-            } else {
-                " save  "
-            },
-            Style::default().fg(MUTED),
-        ),
-        key("c"),
-        Span::styled(" channel  ", Style::default().fg(MUTED)),
-        key("y"),
-        Span::styled(" copy", Style::default().fg(MUTED)),
-    ]));
 
     frame.render_widget(
         Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
-        inner,
+        body,
     );
+}
+
+/// Rows to reserve for a 16:9 thumbnail, using the terminal's cell pixel size
+/// when known so the image is not distorted.
+fn thumbnail_rows(app: &App, inner: Rect) -> u16 {
+    let max_rows = inner.height.saturating_sub(6);
+    if max_rows < 4 {
+        return 0;
+    }
+    let (cell_width, cell_height) = app
+        .picker
+        .as_ref()
+        .map(|picker| picker.font_size())
+        .unwrap_or((8, 16));
+    let cell_width = cell_width.max(1) as u32;
+    let cell_height = cell_height.max(1) as u32;
+    let pixel_width = inner.width as u32 * cell_width;
+    let pixel_height = pixel_width * 9 / 16;
+    let rows = pixel_height.div_ceil(cell_height) as u16;
+    rows.clamp(4, max_rows)
 }
 
 fn draw_settings(frame: &mut Frame, area: Rect, app: &App) {
@@ -519,12 +544,7 @@ fn draw_prompt(frame: &mut Frame, area: Rect, input: &TextInput, prefix: &str) {
         return;
     }
     let height = 2.min(area.height);
-    let rect = Rect::new(
-        area.x,
-        area.bottom().saturating_sub(height),
-        area.width,
-        height,
-    );
+    let rect = Rect::new(area.x, area.y, area.width, height);
     frame.render_widget(Clear, rect);
 
     let line = Line::from(vec![
@@ -788,6 +808,55 @@ mod tests {
             fetched_at: 0,
         };
         app.table_state.select(Some(0));
+        terminal
+            .draw(|frame| draw(frame, &mut app, Instant::now()))
+            .unwrap();
+    }
+
+    #[test]
+    fn renders_details_with_thumbnail_without_panicking() {
+        let backend = TestBackend::new(140, 44);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = app();
+        app.view = View::Browse;
+        app.feed = Feed {
+            title: "Search · rust".into(),
+            source: "https://example.com".into(),
+            kind: FeedKind::Search,
+            subtitle: "SEARCH · 1 RESULTS".into(),
+            items: vec![Video {
+                id: "abc".into(),
+                title: "A video with a thumbnail".into(),
+                url: "https://www.youtube.com/watch?v=abc".into(),
+                channel: "Example channel".into(),
+                channel_url: None,
+                duration: Some(600),
+                view_count: Some(42),
+                timestamp: Some(1_760_000_000),
+                upload_date: None,
+                thumbnail: Some("https://example.com/thumb.jpg".into()),
+                description: None,
+                live: false,
+            }],
+            notice: None,
+            auth: false,
+            fetched_at: 0,
+        };
+        app.table_state.select(Some(0));
+
+        let picker = crate::thumb::halfblocks_picker();
+        let image = image::DynamicImage::ImageRgba8(image::ImageBuffer::from_pixel(
+            320,
+            180,
+            image::Rgba([20u8, 40, 60, 255]),
+        ));
+        let protocol = picker.new_resize_protocol(image);
+        app.set_picker(picker);
+        app.thumbnail = ThumbnailState::Ready {
+            id: "abc".into(),
+            protocol,
+        };
+
         terminal
             .draw(|frame| draw(frame, &mut app, Instant::now()))
             .unwrap();

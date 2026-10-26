@@ -4,7 +4,11 @@ use crate::util::{copy_to_clipboard, now_unix};
 use crate::yt::{self, FeedData, FetchSpec, Video};
 use anyhow::{bail, Result};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use image::DynamicImage;
 use ratatui::widgets::TableState;
+use ratatui_image::picker::Picker;
+use ratatui_image::protocol::StatefulProtocol;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 const TOAST_LIFETIME: Duration = Duration::from_secs(5);
@@ -299,6 +303,42 @@ pub enum Msg {
         ok: bool,
         message: String,
     },
+    Thumbnail {
+        id: String,
+        result: Result<DynamicImage, String>,
+    },
+}
+
+/// A thumbnail fetch request queued by the app and dispatched by the runtime.
+#[derive(Debug, Clone)]
+pub struct ThumbSpec {
+    pub id: String,
+    pub url: String,
+    pub path: PathBuf,
+}
+
+/// Lifecycle of the thumbnail shown in the details pane.
+pub enum ThumbnailState {
+    Idle,
+    Loading {
+        id: String,
+    },
+    Ready {
+        id: String,
+        protocol: StatefulProtocol,
+    },
+    Failed {
+        id: String,
+    },
+}
+
+impl ThumbnailState {
+    pub fn id(&self) -> Option<&str> {
+        match self {
+            Self::Idle => None,
+            Self::Loading { id } | Self::Ready { id, .. } | Self::Failed { id } => Some(id),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -416,10 +456,13 @@ pub struct App {
     pub toast: Option<Toast>,
     pub quit: bool,
     pub last_search: Option<String>,
+    pub picker: Option<Picker>,
+    pub thumbnail: ThumbnailState,
     fetch_id: u64,
     download_id: u64,
     pending_fetch: Option<FetchSpec>,
     pending_effect: Option<Effect>,
+    pending_thumbnail: Option<ThumbSpec>,
     started: Instant,
 }
 
@@ -441,10 +484,13 @@ impl App {
             toast: None,
             quit: false,
             last_search: None,
+            picker: None,
+            thumbnail: ThumbnailState::Idle,
             fetch_id: 0,
             download_id: 0,
             pending_fetch: None,
             pending_effect: None,
+            pending_thumbnail: None,
             started: Instant::now(),
         }
     }
@@ -455,6 +501,46 @@ impl App {
 
     pub fn take_effect(&mut self) -> Option<Effect> {
         self.pending_effect.take()
+    }
+
+    pub fn take_thumbnail(&mut self) -> Option<ThumbSpec> {
+        self.pending_thumbnail.take()
+    }
+
+    /// Install the terminal image picker detected at startup.
+    pub fn set_picker(&mut self, picker: Picker) {
+        self.picker = Some(picker);
+    }
+
+    /// Drop any rendered thumbnail so it is rebuilt on the next frame.
+    pub fn clear_thumbnail(&mut self) {
+        self.thumbnail = ThumbnailState::Idle;
+    }
+
+    /// Make sure the details pane is loading the thumbnail for the current
+    /// selection. Idempotent, so it is safe to call every frame.
+    pub fn sync_thumbnail(&mut self) {
+        if self.view != View::Browse {
+            return;
+        }
+        let Some(video) = self.selected_video() else {
+            self.thumbnail = ThumbnailState::Idle;
+            return;
+        };
+        let id = video.id.clone();
+        if self.thumbnail.id() == Some(id.as_str()) {
+            return;
+        }
+        let Some(url) = video.thumbnail.clone() else {
+            self.thumbnail = ThumbnailState::Failed { id };
+            return;
+        };
+        self.thumbnail = ThumbnailState::Loading { id: id.clone() };
+        self.pending_thumbnail = Some(ThumbSpec {
+            id: id.clone(),
+            url,
+            path: self.paths.thumbnail_file(&id),
+        });
     }
 
     pub fn spinner_frame(&self, now: Instant) -> &'static str {
@@ -1130,6 +1216,30 @@ impl App {
             }
             Msg::DownloadProgress { id, percent } => self.update_download_percent(id, percent),
             Msg::DownloadDone { id, ok, message } => self.finish_download(id, ok, message),
+            Msg::Thumbnail { id, result } => {
+                let waiting = matches!(
+                    &self.thumbnail,
+                    ThumbnailState::Loading { id: current } if current == &id
+                );
+                if !waiting {
+                    return;
+                }
+                match result {
+                    Ok(image) => {
+                        match self
+                            .picker
+                            .as_ref()
+                            .map(|picker| picker.new_resize_protocol(image))
+                        {
+                            Some(protocol) => {
+                                self.thumbnail = ThumbnailState::Ready { id, protocol }
+                            }
+                            None => self.thumbnail = ThumbnailState::Failed { id },
+                        }
+                    }
+                    Err(_) => self.thumbnail = ThumbnailState::Failed { id },
+                }
+            }
         }
     }
 
