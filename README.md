@@ -95,7 +95,7 @@ Subscriptions, Watch Later, and Liked videos need YouTube cookies.
 2. Make sure that browser is signed in to YouTube.
 3. Press `r` in Settings, or restart Utui.
 
-Cookies are used only by the `yt-dlp` subprocess. Utui never reads or stores them itself.
+Cookies are used only by `yt-dlp` and its cookie machinery (also by the account-sync helper, which is a standalone `yt-dlp`-based process). Utui never reads or stores browser cookies itself.
 
 ## Keybindings
 
@@ -119,6 +119,9 @@ Cookies are used only by the `yt-dlp` subprocess. Utui never reads or stores the
 | `p` | Play video |
 | `a` | Play audio only |
 | `d` / `D` | Download video / audio |
+| `l` | Like or unlike the selected video (YouTube account when syncing is on) |
+| `W` | Add to / remove from Watch Later (YouTube account when syncing is on) |
+| `w` | Open your YouTube Watch Later page |
 | `s` | Save or remove the selected video |
 | `c` | Open the selected channel |
 | `y` | Copy the video URL |
@@ -175,9 +178,28 @@ download_dir = "/home/you/Videos/utui"
 
 # Optional, for Subscriptions / Watch Later / Liked videos:
 # cookies_browser = "firefox"
+
+# Write likes and Watch Later to your YouTube account (needs cookies_browser).
+# account_sync = true
 ```
 
 State lives in `~/.local/share/utui/state.json`. Feed cache lives in `~/.cache/utui/feeds` and thumbnail cache in `~/.cache/utui/thumbs`.
+
+## Account sync (real likes and Watch Later)
+
+With `cookies_browser` set and `account_sync = true`, the `l` and `W` keys act on your actual YouTube account, not just a local list:
+
+- `l` likes the video; `l` again unlikes it.
+- `W` adds the video to Watch Later; `W` again removes it.
+- `w` opens the Watch Later queue from your account. On that page `W` removes the item.
+
+How it works: Utui ships a small embedded helper that reuses `yt-dlp`'s cookie extraction (every browser and keyring yt-dlp supports just works), signs requests to YouTube's web API with the same `SAPISIDHASH` scheme the web client uses, and calls the internal like/Watch Later endpoints. The helper is materialized to `~/.cache/utui/sync.py`, so you can inspect exactly what gets sent, and each action prints one JSON result. The local store mirrors the account state so list markers stay accurate; if the account write fails, the mirror rolls back.
+
+Notes:
+
+- YouTube does not let Utui read your current like state cheaply, so the first `l` on a video you already liked elsewhere will unlike it. Open the Liked page to see the truth.
+- Without `cookies_browser`, or with `account_sync = false`, `l` and `W` toggle local mirrors only (the `S` Saved-list equivalent lives locally) and a toast says so.
+- Feeds for Watch Later and Liked videos remain read-through yt-dlp. After a successful sync on those pages, Utui refreshes the list automatically.
 
 ## How it compares to yt-x
 

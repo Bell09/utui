@@ -242,6 +242,12 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
             if video.is_live() {
                 title_spans.push(Span::styled(" live", Style::default().fg(ERROR)));
             }
+            if app.store.is_liked(&video.id) {
+                title_spans.push(Span::styled(" ♥", Style::default().fg(ERROR)));
+            }
+            if app.store.is_watch_later(&video.id) {
+                title_spans.push(Span::styled(" »", Style::default().fg(WARN)));
+            }
             if app.store.is_saved(&video.id) {
                 title_spans.push(Span::styled(" ·", Style::default().fg(ACCENT)));
             }
@@ -334,6 +340,18 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
         lines.push(Line::from(Span::styled(
             "live",
             Style::default().fg(ERROR).add_modifier(Modifier::BOLD),
+        )));
+    }
+    if app.store.is_liked(&video.id) {
+        lines.push(Line::from(Span::styled(
+            "liked",
+            Style::default().fg(ERROR).add_modifier(Modifier::BOLD),
+        )));
+    }
+    if app.store.is_watch_later(&video.id) {
+        lines.push(Line::from(Span::styled(
+            "watch later",
+            Style::default().fg(WARN).add_modifier(Modifier::BOLD),
         )));
     }
     if app.store.is_saved(&video.id) {
@@ -477,6 +495,8 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
             ("p", "play"),
             ("a", "audio"),
             ("d", "download"),
+            ("l", "like"),
+            ("W", "later"),
             ("s", "save"),
             ("/", "search"),
             ("b", "back"),
@@ -663,6 +683,9 @@ fn draw_help(frame: &mut Frame, area: Rect) {
             ("p", "play"),
             ("a", "audio"),
             ("d/D", "download"),
+            ("l", "like"),
+            ("W", "later"),
+            ("w", "watch later page"),
             ("s", "save"),
             ("c", "channel"),
             ("y", "copy"),
@@ -692,6 +715,20 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         )),
         Line::from(Span::styled(
             "watch later, and liked videos",
+            Style::default().fg(MUTED),
+        )),
+        Line::from(""),
+        section("account"),
+        Line::from(Span::styled(
+            "l and W write real likes / Watch Later to your YouTube",
+            Style::default().fg(MUTED),
+        )),
+        Line::from(Span::styled(
+            "account when cookies_browser is set (account_sync = true);",
+            Style::default().fg(MUTED),
+        )),
+        Line::from(Span::styled(
+            "otherwise they toggle local mirrors only",
             Style::default().fg(MUTED),
         )),
         Line::from(""),

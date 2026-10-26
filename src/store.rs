@@ -19,6 +19,8 @@ pub struct HistoryEntry {
 #[serde(default)]
 pub struct Store {
     pub saved: Vec<Video>,
+    pub liked: Vec<Video>,
+    pub watch_later: Vec<Video>,
     pub history: Vec<HistoryEntry>,
     /// Newest first.
     pub search_history: Vec<String>,
@@ -45,6 +47,10 @@ impl Store {
     pub fn normalize(&mut self) {
         deduplicate_videos(&mut self.saved);
         self.saved.truncate(MAX_SAVED);
+        deduplicate_videos(&mut self.liked);
+        self.liked.truncate(MAX_SAVED);
+        deduplicate_videos(&mut self.watch_later);
+        self.watch_later.truncate(MAX_SAVED);
 
         let mut seen = std::collections::HashSet::new();
         self.history
@@ -72,6 +78,32 @@ impl Store {
             self.saved.insert(0, video.clone());
             self.saved.truncate(MAX_SAVED);
             true
+        }
+    }
+
+    pub fn is_liked(&self, id: &str) -> bool {
+        self.liked.iter().any(|video| video.id == id)
+    }
+
+    pub fn is_watch_later(&self, id: &str) -> bool {
+        self.watch_later.iter().any(|video| video.id == id)
+    }
+
+    /// Forces the liked-mirror into an exact state (used after account sync).
+    pub fn set_like(&mut self, video: &Video, on: bool) {
+        self.liked.retain(|liked| liked.id != video.id);
+        if on {
+            self.liked.insert(0, video.clone());
+            self.liked.truncate(MAX_SAVED);
+        }
+    }
+
+    /// Forces the Watch Later mirror into an exact state (used after account sync).
+    pub fn set_watch_later(&mut self, video: &Video, on: bool) {
+        self.watch_later.retain(|queued| queued.id != video.id);
+        if on {
+            self.watch_later.insert(0, video.clone());
+            self.watch_later.truncate(MAX_SAVED);
         }
     }
 
@@ -158,5 +190,49 @@ mod tests {
         store.add_search("lofi");
         store.add_search("RUST");
         assert_eq!(store.search_history, vec!["RUST", "lofi"]);
+    }
+
+    #[test]
+    fn set_like_forces_exact_state() {
+        let mut store = Store::default();
+        let video = Video {
+            id: "abc".to_string(),
+            title: "Abc".to_string(),
+            ..Video::default()
+        };
+        store.set_like(&video, true);
+        assert!(store.is_liked("abc"));
+        store.set_like(&video, true);
+        assert_eq!(store.liked.len(), 1, "idempotent set must not duplicate");
+        store.set_like(&video, false);
+        assert!(!store.is_liked("abc"));
+        assert!(store.liked.is_empty());
+    }
+
+    #[test]
+    fn set_watch_later_forces_exact_state() {
+        let mut store = Store::default();
+        let queued = Video {
+            id: "wl".to_string(),
+            ..Video::default()
+        };
+        let other = Video {
+            id: "wl2".to_string(),
+            ..Video::default()
+        };
+        store.set_watch_later(&queued, true);
+        store.set_watch_later(&other, true);
+        assert_eq!(
+            store
+                .watch_later
+                .iter()
+                .map(|v| v.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["wl2", "wl"],
+            "newest first"
+        );
+        store.set_watch_later(&queued, false);
+        assert!(!store.is_watch_later("wl"));
+        assert_eq!(store.watch_later.len(), 1);
     }
 }

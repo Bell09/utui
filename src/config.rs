@@ -86,6 +86,8 @@ pub struct Config {
     pub download_dir: PathBuf,
     /// Optional browser name passed to `yt-dlp --cookies-from-browser`.
     pub cookies_browser: Option<String>,
+    /// Sync likes and Watch Later to the real YouTube account (needs cookies_browser).
+    pub account_sync: bool,
 }
 
 impl Default for Config {
@@ -109,6 +111,7 @@ impl Default for Config {
             results: 50,
             download_dir,
             cookies_browser: None,
+            account_sync: true,
         }
     }
 }
@@ -155,7 +158,6 @@ impl Config {
             self.download_dir = Self::default().download_dir;
         }
     }
-
     pub fn download_video_dir(&self) -> PathBuf {
         self.download_dir.join("video")
     }

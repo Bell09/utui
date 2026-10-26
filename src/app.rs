@@ -1,5 +1,6 @@
 use crate::config::{Config, Paths};
 use crate::store::Store;
+use crate::sync::SyncAction;
 use crate::util::{copy_to_clipboard, now_unix};
 use crate::yt::{self, FeedData, FetchSpec, Video};
 use anyhow::{bail, Result};
@@ -285,6 +286,10 @@ pub enum Effect {
     OpenUrl(String),
     EditConfig,
     OpenDownloads,
+    Sync {
+        video: Video,
+        action: SyncAction,
+    },
 }
 
 #[derive(Debug)]
@@ -305,6 +310,12 @@ pub enum Msg {
     Thumbnail {
         id: String,
         result: Result<DynamicImage, String>,
+    },
+    SyncDone {
+        video_id: String,
+        action: SyncAction,
+        ok: bool,
+        message: String,
     },
 }
 
@@ -865,6 +876,9 @@ impl App {
             KeyCode::Char('D') => self.download_selected(true),
             KeyCode::Char('s') => self.toggle_selected_saved(),
             KeyCode::Char('c') => self.open_selected_channel(),
+            KeyCode::Char('l') => self.toggle_like_selected(),
+            KeyCode::Char('W') => self.toggle_watch_later_selected(),
+            KeyCode::Char('w') => self.open_watch_later_page(),
             KeyCode::Char('y') => self.copy_selected_url(),
             KeyCode::Char('o') => self.open_selected_browser(),
             KeyCode::Char('r') => self.refresh(),
@@ -1034,6 +1048,106 @@ impl App {
         } else {
             self.toast_info("Removed from saved videos");
         }
+    }
+
+    /// Like state lives on the account when syncing is on: press `l` to like,
+    /// `l` again to unlike. The local store mirrors the account state.
+    fn toggle_like_selected(&mut self) {
+        let Some(video) = self.selected_video().cloned() else {
+            return;
+        };
+        let on = !self.store.is_liked(&video.id);
+        self.store.set_like(&video, on);
+        let _ = self.persist();
+        self.dispatch_sync(
+            &video,
+            SyncAction::Like {
+                video_id: video.id.clone(),
+                on,
+            },
+            on,
+            "Liked",
+            "Removed like",
+        );
+    }
+
+    /// `W` queues the selected video for Watch Later (`W` again removes it).
+    fn toggle_watch_later_selected(&mut self) {
+        let Some(video) = self.selected_video().cloned() else {
+            return;
+        };
+        let on = !self.feed_is_watch_later_page() && !self.store.is_watch_later(&video.id);
+        self.store.set_watch_later(&video, on);
+        let _ = self.persist();
+        self.dispatch_sync(
+            &video,
+            SyncAction::WatchLater {
+                video_id: video.id.clone(),
+                add: on,
+            },
+            on,
+            "Added to Watch Later",
+            "Removed from Watch Later",
+        );
+    }
+
+    /// Fallback when account sync is unavailable: queue/like locally and say so.
+    fn queue_locally(&mut self, on: bool, added: &str, removed: &str) {
+        let reason = if self.config.account_sync {
+            "set cookies_browser for account sync"
+        } else {
+            "account_sync is off in config.toml"
+        };
+        let text = if on {
+            format!("{added} (local · {reason})")
+        } else {
+            format!("{removed} (local · {reason})")
+        };
+        self.toast_info(text);
+    }
+
+    fn dispatch_sync(
+        &mut self,
+        video: &Video,
+        action: SyncAction,
+        on: bool,
+        added: &str,
+        removed: &str,
+    ) {
+        if !self.sync_enabled() {
+            self.queue_locally(on, added, removed);
+            return;
+        }
+        self.toast_info("Syncing with your YouTube account…");
+        self.pending_effect = Some(Effect::Sync {
+            video: video.clone(),
+            action,
+        });
+    }
+
+    fn sync_enabled(&self) -> bool {
+        self.config.account_sync && self.config.cookies_browser.is_some()
+    }
+
+    fn feed_is_watch_later_page(&self) -> bool {
+        self.feed.source.contains("list=WL")
+    }
+
+    fn feed_is_liked_page(&self) -> bool {
+        self.feed.source.contains("list=LL")
+    }
+
+    /// `w` opens the account's real Watch Later page (cookie-backed).
+    fn open_watch_later_page(&mut self) {
+        self.request_feed(
+            "https://www.youtube.com/playlist?list=WL".to_string(),
+            "Watch Later".to_string(),
+            "YOUTUBE · COOKIES".to_string(),
+            FeedKind::Remote,
+            true,
+            true,
+            false,
+        );
     }
 
     fn open_selected_channel(&mut self) {
@@ -1226,6 +1340,84 @@ impl App {
                     Err(_) => self.thumbnail = ThumbnailState::Failed { id },
                 }
             }
+            Msg::SyncDone {
+                video_id,
+                action,
+                ok,
+                message,
+            } => {
+                let finding = self
+                    .feed
+                    .items
+                    .iter()
+                    .find(|item| item.id == video_id)
+                    .cloned();
+                match action {
+                    SyncAction::Like { on, .. } => {
+                        self.finish_sync(&video_id, finding.as_ref(), true, on, ok, &message)
+                    }
+                    SyncAction::WatchLater { add, .. } => {
+                        self.finish_sync(&video_id, finding.as_ref(), false, add, ok, &message)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Applies one completed sync action to the local mirror: keep the state on
+    /// success, roll it back on failure, and refresh account pages that list
+    /// the thing we just changed on the server.
+    fn finish_sync(
+        &mut self,
+        video_id: &str,
+        video: Option<&Video>,
+        like: bool,
+        on: bool,
+        ok: bool,
+        message: &str,
+    ) {
+        match ok {
+            true => {
+                if let Some(video) = video {
+                    if like {
+                        self.store.set_like(video, on);
+                    } else {
+                        self.store.set_watch_later(video, on);
+                    }
+                    let _ = self.persist();
+                }
+                let done = match (like, on) {
+                    (true, true) => "Liked on YouTube",
+                    (true, false) => "Like removed on YouTube",
+                    (false, true) => "Added to Watch Later on YouTube",
+                    (false, false) => "Removed from Watch Later on YouTube",
+                };
+                self.toast_success(done);
+                self.refresh_after_sync(video_id);
+            }
+            false => {
+                if let Some(video) = video {
+                    if like {
+                        self.store.set_like(video, !on);
+                    } else {
+                        self.store.set_watch_later(video, !on);
+                    }
+                    let _ = self.persist();
+                    if self.feed_is_liked_page() || self.feed_is_watch_later_page() {
+                        self.refresh_after_sync(video_id);
+                    }
+                }
+                self.toast_error(message.to_string());
+            }
+        }
+    }
+
+    /// Re-fetch the account page whose membership just changed on the server.
+    fn refresh_after_sync(&mut self, video_id: &str) {
+        let page_changed = (self.feed_is_watch_later_page() || self.feed_is_liked_page())
+            && self.feed.items.iter().any(|item| item.id == video_id);
+        if page_changed {
+            self.refresh();
         }
     }
 

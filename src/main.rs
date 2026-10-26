@@ -1,6 +1,7 @@
 mod app;
 mod config;
 mod store;
+mod sync;
 mod theme;
 mod thumb;
 mod ui;
@@ -157,6 +158,7 @@ async fn run_tui(app: &mut App) -> Result<()> {
     app.set_picker(thumb::picker());
     let mut active_fetch: Option<JoinHandle<()>> = None;
     let mut active_thumb: Option<JoinHandle<()>> = None;
+    let mut active_sync: Option<JoinHandle<()>> = None;
 
     let result: Result<()> = async {
         loop {
@@ -222,6 +224,34 @@ async fn run_tui(app: &mut App) -> Result<()> {
                         Ok(()) => app.toast_success("Opened in your browser"),
                         Err(error) => app.toast_error(error.to_string()),
                     },
+                    Effect::Sync { video, action } => {
+                        let script = app.paths.cache_dir.join("sync.py");
+                        if let Err(error) = sync::prepare_script(&script) {
+                            app.toast_error(error.to_string());
+                        } else {
+                            if let Some(handle) = active_sync.take() {
+                                handle.abort();
+                            }
+                            let browser = app.config.cookies_browser.clone().unwrap_or_default();
+                            let tx = tx.clone();
+                            active_sync = Some(tokio::spawn(async move {
+                                let outcome = sync::run(&action, &browser, &script)
+                                    .await
+                                    .map_err(|error| error.to_string());
+                                let (ok, message) = match outcome {
+                                    Ok(summary) => (true, summary),
+                                    Err(message) => (false, message),
+                                };
+                                let context = util::truncate(&video.title, 40);
+                                let _ = tx.send(Msg::SyncDone {
+                                    video_id: video.id.clone(),
+                                    action,
+                                    ok,
+                                    message: format!("{context}: {message}"),
+                                });
+                            }));
+                        }
+                    }
                     Effect::EditConfig => {
                         suspend_tui();
                         let outcome = edit_config(&app.paths.config_file());
