@@ -1,4 +1,6 @@
-use crate::app::{Action, App, Overlay, TextInput, ThumbnailState, ToastKind, View, HOME_ITEMS};
+use crate::app::{
+    visible_home_items, Action, App, HomeItem, Overlay, TextInput, ThumbnailState, ToastKind, View,
+};
 use crate::theme::*;
 use crate::util::{
     display_width, format_date, format_duration, format_views, relative_time, truncate,
@@ -8,7 +10,8 @@ use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
-    Block, Cell, Clear, List, ListItem, ListState, Padding, Paragraph, Row, Table, Wrap,
+    Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Padding, Paragraph, Row,
+    Table, Wrap,
 };
 use ratatui::Frame;
 use ratatui_image::StatefulImage;
@@ -74,7 +77,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
 }
 
 fn draw_home(frame: &mut Frame, area: Rect, app: &mut App) {
-    let show_intro = area.height >= 14;
+    let show_intro = area.height >= 12;
     let intro_height = if show_intro { 2 } else { 0 };
     let recent_height = if show_intro && !app.store.search_history.is_empty() {
         1
@@ -85,6 +88,7 @@ fn draw_home(frame: &mut Frame, area: Rect, app: &mut App) {
     let sections = Layout::vertical([
         Constraint::Length(intro_height),
         Constraint::Length(recent_height),
+        Constraint::Length(3),
         Constraint::Min(0),
     ])
     .split(area);
@@ -121,31 +125,46 @@ fn draw_home(frame: &mut Frame, area: Rect, app: &mut App) {
     draw_home_menu(frame, sections[2], app);
 }
 
+/// One horizontal row of bordered cells, directly under the search prompt.
 fn draw_home_menu(frame: &mut Frame, area: Rect, app: &mut App) {
-    if area.height == 0 {
+    if area.height < 2 || area.width < 20 {
         return;
     }
 
-    let items: Vec<ListItem> = HOME_ITEMS
-        .iter()
-        .map(|item| {
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("{:>2}  ", item.key),
-                    Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(format!("{:<17}", item.title), Style::default().fg(*TEXT)),
-                Span::styled(item.description, Style::default().fg(*MUTED)),
-            ]))
-        })
-        .collect();
+    let items: Vec<&HomeItem> = visible_home_items().collect();
+    let count = items.len();
+    let widths: Vec<Constraint> = vec![Constraint::Ratio(1, count as u32); count];
+    let cells = Layout::horizontal(widths).spacing(1).split(area);
 
-    let mut state = ListState::default();
-    state.select(Some(app.home_index));
-    let list = List::new(items)
-        .highlight_symbol("▌ ")
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
-    frame.render_stateful_widget(list, area, &mut state);
+    for (index, (item, cell)) in items.iter().zip(cells.iter()).enumerate() {
+        let selected = index == app.home_index;
+        let (border, title, key) = if selected {
+            (
+                Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
+                Style::default().fg(*TEXT).add_modifier(Modifier::BOLD),
+                Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
+            )
+        } else {
+            (
+                Style::default().fg(*MUTED),
+                Style::default().fg(*TEXT),
+                Style::default().fg(*MUTED),
+            )
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(border);
+        let line = Line::from(vec![
+            Span::styled(format!(" {} ", item.key), key),
+            Span::raw(" "),
+            Span::styled(item.title.to_string(), title),
+        ]);
+        frame.render_widget(
+            Paragraph::new(line).block(block).wrap(Wrap { trim: true }),
+            *cell,
+        );
+    }
 }
 
 fn draw_browse(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
@@ -487,7 +506,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
 
     let hints: &[(&str, &str)] = match app.view {
         View::Home => &[
-            ("↑↓", "move"),
+            ("←→", "select"),
             ("enter", "open"),
             ("/", "search"),
             ("?", "help"),

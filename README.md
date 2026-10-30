@@ -110,6 +110,17 @@ Cookies are used only by `yt-dlp` and its cookie machinery (also by the account-
 | `q` | Quit |
 | `Ctrl+C` | Quit |
 
+### Home
+
+Watch Later, Liked videos, Saved videos, History, and Settings sit in a single horizontal bar of bordered cells right under the search input.
+
+| Key | Action |
+| --- | --- |
+| `←` / `→` (or `h` / `j` / `k` / `Tab`) | Move between cells |
+| `Enter` | Open the selected cell |
+| `w` `l` `S` `H` `,` | Jump straight to Watch Later / Liked / Saved / History / Settings |
+| `f` | Subscriptions (cookie-backed; kept as a hidden shortcut) |
+
 ### Browse
 
 | Key | Action |

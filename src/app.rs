@@ -369,70 +369,71 @@ pub enum HomeAction {
     Saved,
     History,
     Settings,
-    Quit,
 }
 
 pub struct HomeItem {
     pub key: &'static str,
     pub title: &'static str,
-    pub description: &'static str,
     pub action: HomeAction,
+    /// Not shown in the horizontal menu bar, still reachable by its key
+    /// (and by last-feed restore).
+    pub hidden: bool,
+}
+
+pub fn visible_home_items() -> impl Iterator<Item = &'static HomeItem> {
+    HOME_ITEMS.iter().filter(|item| !item.hidden)
 }
 
 pub const HOME_ITEMS: &[HomeItem] = &[
     HomeItem {
-        key: "f",
-        title: "Subscriptions",
-        description: "Latest from channels you follow · cookies",
-        action: HomeAction::Remote {
-            title: "Subscriptions",
-            url: "https://www.youtube.com/feed/subscriptions",
-            auth: true,
-        },
-    },
-    HomeItem {
         key: "w",
         title: "Watch Later",
-        description: "Your YouTube Watch Later queue · cookies",
         action: HomeAction::Remote {
             title: "Watch Later",
             url: "https://www.youtube.com/playlist?list=WL",
             auth: true,
         },
+        hidden: false,
     },
     HomeItem {
         key: "l",
         title: "Liked videos",
-        description: "Everything you liked on YouTube · cookies",
         action: HomeAction::Remote {
             title: "Liked videos",
             url: "https://www.youtube.com/playlist?list=LL",
             auth: true,
         },
+        hidden: false,
     },
     HomeItem {
         key: "S",
         title: "Saved videos",
-        description: "Your local Utui collection",
         action: HomeAction::Saved,
+        hidden: false,
     },
     HomeItem {
         key: "H",
         title: "History",
-        description: "Recently played on this machine",
         action: HomeAction::History,
+        hidden: false,
     },
     HomeItem {
         key: ",",
         title: "Settings",
-        description: "Player, cookies, downloads, and paths",
         action: HomeAction::Settings,
+        hidden: false,
     },
+    // Cookie-path subscriptions stay a shortcut (`f`) and are restorable,
+    // but are not part of the horizontal menu bar.
     HomeItem {
-        key: "q",
-        title: "Quit",
-        description: "Leave Utui",
-        action: HomeAction::Quit,
+        key: "f",
+        title: "Subscriptions",
+        action: HomeAction::Remote {
+            title: "Subscriptions",
+            url: "https://www.youtube.com/feed/subscriptions",
+            auth: true,
+        },
+        hidden: true,
     },
 ];
 
@@ -701,10 +702,14 @@ impl App {
         !input.chars().any(char::is_whitespace) && input.contains('.')
     }
 
-    pub fn open_home_item(&mut self, index: usize) {
-        let Some(item) = HOME_ITEMS.get(index) else {
+    pub fn open_visible_home_item(&mut self, index: usize) {
+        let Some(item) = visible_home_items().nth(index) else {
             return;
         };
+        self.open_home_entry(item);
+    }
+
+    fn open_home_entry(&mut self, item: &'static HomeItem) {
         match item.action {
             HomeAction::Remote { title, url, auth } => {
                 self.home_origin = Some(item.key);
@@ -727,14 +732,13 @@ impl App {
                 self.show_history(false);
             }
             HomeAction::Settings => self.view = View::Settings,
-            HomeAction::Quit => self.quit = true,
         }
     }
 
     /// Open a home entry by its key letter, so shortcuts never depend on list order.
     fn open_home_item_by_key(&mut self, key: &str) {
-        if let Some(index) = HOME_ITEMS.iter().position(|item| item.key == key) {
-            self.open_home_item(index);
+        if let Some(item) = HOME_ITEMS.iter().find(|item| item.key == key) {
+            self.open_home_entry(item);
         }
     }
 
@@ -924,13 +928,14 @@ impl App {
 
     fn handle_home_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h') => {
                 self.home_index = self.home_index.saturating_sub(1);
             }
-            KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
-                self.home_index = (self.home_index + 1).min(HOME_ITEMS.len() - 1);
+            KeyCode::Right | KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
+                let count = visible_home_items().count();
+                self.home_index = (self.home_index + 1).min(count.saturating_sub(1));
             }
-            KeyCode::Enter => self.open_home_item(self.home_index),
+            KeyCode::Enter => self.open_visible_home_item(self.home_index),
             KeyCode::Char('f') => self.open_home_item_by_key("f"),
             KeyCode::Char('w') => self.open_home_item_by_key("w"),
             KeyCode::Char('l') => self.open_home_item_by_key("l"),
