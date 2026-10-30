@@ -77,17 +77,11 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
 }
 
 fn draw_home(frame: &mut Frame, area: Rect, app: &mut App) {
-    let show_intro = area.height >= 12;
+    let show_intro = area.height >= 10;
     let intro_height = if show_intro { 2 } else { 0 };
-    let recent_height = if show_intro && !app.store.search_history.is_empty() {
-        1
-    } else {
-        0
-    };
 
     let sections = Layout::vertical([
         Constraint::Length(intro_height),
-        Constraint::Length(recent_height),
         Constraint::Length(3),
         Constraint::Min(0),
     ])
@@ -104,25 +98,7 @@ fn draw_home(frame: &mut Frame, area: Rect, app: &mut App) {
         frame.render_widget(Paragraph::new(Text::from(lines)), sections[0]);
     }
 
-    if recent_height > 0 {
-        let mut spans = vec![Span::styled("recent  ", Style::default().fg(*MUTED))];
-        for (index, query) in app.store.search_history.iter().take(4).enumerate() {
-            if index > 0 {
-                spans.push(Span::styled("  ", Style::default().fg(*MUTED)));
-            }
-            spans.push(Span::styled(
-                format!("!{} ", index + 1),
-                Style::default().fg(*ACCENT),
-            ));
-            spans.push(Span::styled(
-                truncate(query, 18),
-                Style::default().fg(*MUTED),
-            ));
-        }
-        frame.render_widget(Paragraph::new(Line::from(spans)), sections[1]);
-    }
-
-    draw_home_menu(frame, sections[2], app);
+    draw_home_menu(frame, sections[1], app);
 }
 
 /// One horizontal row of bordered cells, directly under the search prompt.
