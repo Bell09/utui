@@ -1,5 +1,5 @@
 use crate::config::{Config, Paths};
-use crate::store::Store;
+use crate::store::{RememberedFeed, Store};
 use crate::sync::SyncAction;
 use crate::util::{copy_to_clipboard, now_unix};
 use crate::yt::{self, FeedData, FetchSpec, Video};
@@ -452,6 +452,8 @@ pub struct App {
     pub toast: Option<Toast>,
     pub quit: bool,
     pub last_search: Option<String>,
+    /// Home-menu key of the feed currently loading, for last-feed memory.
+    home_origin: Option<&'static str>,
     pub picker: Option<Picker>,
     pub thumbnail: ThumbnailState,
     fetch_id: u64,
@@ -464,7 +466,7 @@ pub struct App {
 
 impl App {
     pub fn new(paths: Paths, config: Config, store: Store) -> Self {
-        Self {
+        let mut app = Self {
             paths,
             config,
             store,
@@ -480,6 +482,7 @@ impl App {
             toast: None,
             quit: false,
             last_search: None,
+            home_origin: None,
             picker: None,
             thumbnail: ThumbnailState::Idle,
             fetch_id: 0,
@@ -488,11 +491,63 @@ impl App {
             pending_effect: None,
             pending_thumbnail: None,
             started: Instant::now(),
-        }
+        };
+        app.restore_last_feed();
+        app
     }
 
     pub fn take_fetch(&mut self) -> Option<FetchSpec> {
         self.pending_fetch.take()
+    }
+
+    /// Reopen the feed that was on screen when the last run ended, so Utui
+    /// always starts inside a feed instead of on the home menu.
+    pub fn restore_last_feed(&mut self) {
+        let Some(last) = self.store.last_feed.clone() else {
+            return;
+        };
+        if let Some(key) = last.home_key {
+            self.open_home_item_by_key(&key);
+        } else if let Some(source) = last.source {
+            let title = last.title.clone().unwrap_or_else(|| "Feed".to_string());
+            self.request_feed(
+                source,
+                title,
+                String::new(),
+                FeedKind::Remote,
+                last.auth,
+                false,
+                false,
+            );
+        }
+    }
+
+    /// Persists the last-viewed feed so the next launch reopens it.
+    fn remember_last_feed(&mut self) {
+        let remembered = if let Some(key) = self.home_origin {
+            RememberedFeed {
+                home_key: Some(key.to_string()),
+                source: None,
+                title: None,
+                auth: self.feed.auth,
+            }
+        } else if self.feed.items.is_empty() {
+            return;
+        } else {
+            RememberedFeed {
+                home_key: None,
+                source: if self.feed.source.starts_with("utui://") {
+                    None
+                } else {
+                    Some(self.feed.source.clone())
+                },
+                title: Some(self.feed.title.clone()),
+                auth: self.feed.auth,
+            }
+        };
+        self.home_origin = None;
+        self.store.last_feed = Some(remembered);
+        let _ = self.persist();
     }
 
     pub fn take_effect(&mut self) -> Option<Effect> {
@@ -590,6 +645,7 @@ impl App {
         let title = format!("Search · {}", plan.term);
         let url = yt::build_search_url(&plan.term, &plan.sp);
         let _ = self.persist();
+        self.home_origin = None;
         self.request_feed(url, title, subtitle, FeedKind::Search, false, false, false);
         Ok(())
     }
@@ -619,6 +675,7 @@ impl App {
         } else {
             FeedKind::Remote
         };
+        self.home_origin = None;
         self.request_feed(
             url,
             "Opening URL".to_string(),
@@ -650,6 +707,7 @@ impl App {
         };
         match item.action {
             HomeAction::Remote { title, url, auth } => {
+                self.home_origin = Some(item.key);
                 self.request_feed(
                     url.to_string(),
                     title.to_string(),
@@ -660,8 +718,14 @@ impl App {
                     false,
                 );
             }
-            HomeAction::Saved => self.show_saved(false),
-            HomeAction::History => self.show_history(false),
+            HomeAction::Saved => {
+                self.home_origin = Some(item.key);
+                self.show_saved(false);
+            }
+            HomeAction::History => {
+                self.home_origin = Some(item.key);
+                self.show_history(false);
+            }
             HomeAction::Settings => self.view = View::Settings,
             HomeAction::Quit => self.quit = true,
         }
@@ -730,6 +794,23 @@ impl App {
         self.view = View::Browse;
         self.overlay = None;
         self.reset_selection();
+        match self.feed.kind {
+            FeedKind::Saved => self.remember_home_feed("S"),
+            FeedKind::History => self.remember_home_feed("H"),
+            _ => self.remember_last_feed(),
+        }
+    }
+
+    /// Local collection feeds are remembered by their home-menu shortcut key.
+    fn remember_home_feed(&mut self, key: &'static str) {
+        self.store.last_feed = Some(RememberedFeed {
+            home_key: Some(key.to_string()),
+            source: None,
+            title: Some(self.feed.title.clone()),
+            auth: false,
+        });
+        self.home_origin = None;
+        let _ = self.persist();
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1139,6 +1220,7 @@ impl App {
 
     /// `w` opens the account's real Watch Later page (cookie-backed).
     fn open_watch_later_page(&mut self) {
+        self.home_origin = None;
         self.request_feed(
             "https://www.youtube.com/playlist?list=WL".to_string(),
             "Watch Later".to_string(),
@@ -1162,6 +1244,7 @@ impl App {
         if !url.ends_with("/videos") {
             url.push_str("/videos");
         }
+        self.home_origin = None;
         self.request_feed(
             url,
             format!("Channel · {}", video.channel),
@@ -1307,6 +1390,7 @@ impl App {
                         self.feed.items = data.items;
                         self.feed.fetched_at = data.fetched_at;
                         self.reset_selection();
+                        self.remember_last_feed();
                     }
                     Err(error) => {
                         self.feed.notice = Some(error.clone());

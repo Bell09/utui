@@ -15,6 +15,19 @@ pub struct HistoryEntry {
     pub watched_at: i64,
 }
 
+/// The feed shown on the previous run so the next launch opens right into it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct RememberedFeed {
+    /// Home-menu shortcut key (Saved / History / Subscriptions / Watch Later ...).
+    pub home_key: Option<String>,
+    /// Direct source URL when the feed came from search/channel/playlist views.
+    pub source: Option<String>,
+    pub title: Option<String>,
+    /// Cookie-backed feeds remember that they need `cookies_browser`.
+    pub auth: bool,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Store {
@@ -24,6 +37,7 @@ pub struct Store {
     pub history: Vec<HistoryEntry>,
     /// Newest first.
     pub search_history: Vec<String>,
+    pub last_feed: Option<RememberedFeed>,
 }
 
 impl Store {
@@ -190,6 +204,24 @@ mod tests {
         store.add_search("lofi");
         store.add_search("RUST");
         assert_eq!(store.search_history, vec!["RUST", "lofi"]);
+    }
+
+    #[test]
+    fn last_feed_remembers_and_defaults_cleanly() {
+        let mut store = Store::default();
+        assert!(store.last_feed.is_none());
+        store.last_feed = Some(RememberedFeed {
+            home_key: Some("S".into()),
+            source: None,
+            title: Some("Saved videos".into()),
+            auth: false,
+        });
+        let raw = serde_json::to_string(&store).unwrap();
+        let round: Store = serde_json::from_str(&raw).unwrap();
+        assert_eq!(round.last_feed, store.last_feed);
+        // Older state files without the field still load.
+        let old: Store = serde_json::from_str(r#"{"saved":[],"history":[]}"#).unwrap();
+        assert!(old.last_feed.is_none());
     }
 
     #[test]

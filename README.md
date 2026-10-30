@@ -16,6 +16,8 @@ It reimplements the `yt-x` workflow as a single native binary: no shell script, 
 - **Downloads** — individual video or MP3 audio, organized under `download_dir/video` and `download_dir/audio`, with live progress in the status bar.
 - **Library** — locally saved videos and watch history, stored as JSON.
 - **Cookie-backed feeds** — Subscriptions, Watch Later, and Liked videos via `yt-dlp --cookies-from-browser`.
+- **Feeds on launch** — Utui reopens the feed you were viewing when you last quit, so content is on screen immediately.
+- **pywal colors** — when `~/.cache/wal/colors.json` exists (written by [pywal](https://github.com/dylanaraps/pywal)), the wallpaper's 16-color palette drives the interface: the background is painted, text uses the palette foreground, and accent/success/warning/error/dim all map to palette colors. Without pywal, Utui uses your terminal's own colors with a cyan accent.
 - **Scriptable** — `--json` gives clean machine-readable output for scripts and pipelines.
 - **Small and fast** — release builds use LTO and a single codegen unit. The only HTTP traffic is thumbnail downloads from YouTube's image CDN.
 
@@ -183,7 +185,21 @@ download_dir = "/home/you/Videos/utui"
 # account_sync = true
 ```
 
-State lives in `~/.local/share/utui/state.json`. Feed cache lives in `~/.cache/utui/feeds` and thumbnail cache in `~/.cache/utui/thumbs`.
+State lives in `~/.local/share/utui/state.json`. Feed cache lives in `~/.cache/utui/feeds` and thumbnail cache in `~/.cache/utui/thumbs`. `state.json` also remembers the last feed so the next launch reopens it (`f`/`w`/`l`/`S`/`H` pages by shortcut; searches and channels by source).
+
+## Theme (pywal)
+
+Utui reads `~/.cache/wal/colors.json` at startup:
+
+| Interface role | pywal color |
+| --- | --- |
+| Background | `color0` / `special.background` |
+| Text | `color7`, then `color15`, then `special.foreground` |
+| Accent (keys, spinner, prompts) | `color4`, then `color6` |
+| Success / Warning / Error | `color2` / `color3` / `color1` |
+| Dim text | `color8` |
+
+No file, no palette → your terminal's own defaults. `WAL_COLORS_FILE` overrides the path for testing.
 
 ## Account sync (real likes and Watch Later)
 

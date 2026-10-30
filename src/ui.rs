@@ -16,6 +16,9 @@ use std::time::Instant;
 
 pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
     let area = frame.area();
+    if bg_active() {
+        frame.render_widget(Block::default().style(Style::new().bg(*BG)), area);
+    }
     let layout = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(0),
@@ -44,25 +47,25 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
             &app.current_title(),
             chunks[0].width.saturating_sub(10) as usize,
         ),
-        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        Style::default().fg(*TEXT).add_modifier(Modifier::BOLD),
     )];
     if app.can_go_back() {
-        spans.push(Span::styled("  b back", Style::default().fg(MUTED)));
+        spans.push(Span::styled("  b back", Style::default().fg(*MUTED)));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), chunks[0]);
 
     let right = if app.loading {
         Line::from(vec![
-            Span::styled(app.spinner_frame(now), Style::default().fg(ACCENT)),
+            Span::styled(app.spinner_frame(now), Style::default().fg(*ACCENT)),
             Span::styled(
                 format!(" {}", truncate(&app.loading_label, 22)),
-                Style::default().fg(MUTED),
+                Style::default().fg(*MUTED),
             ),
         ])
     } else if app.view == View::Browse {
         Line::from(Span::styled(
             format!("{} items ", app.feed.items.len()),
-            Style::default().fg(MUTED),
+            Style::default().fg(*MUTED),
         ))
     } else {
         Line::from("")
@@ -90,7 +93,7 @@ fn draw_home(frame: &mut Frame, area: Rect, app: &mut App) {
         let lines = vec![
             Line::from(Span::styled(
                 "YouTube at terminal velocity",
-                Style::default().fg(MUTED),
+                Style::default().fg(*MUTED),
             )),
             Line::from(""),
         ];
@@ -98,18 +101,18 @@ fn draw_home(frame: &mut Frame, area: Rect, app: &mut App) {
     }
 
     if recent_height > 0 {
-        let mut spans = vec![Span::styled("recent  ", Style::default().fg(MUTED))];
+        let mut spans = vec![Span::styled("recent  ", Style::default().fg(*MUTED))];
         for (index, query) in app.store.search_history.iter().take(4).enumerate() {
             if index > 0 {
-                spans.push(Span::styled("  ", Style::default().fg(MUTED)));
+                spans.push(Span::styled("  ", Style::default().fg(*MUTED)));
             }
             spans.push(Span::styled(
                 format!("!{} ", index + 1),
-                Style::default().fg(ACCENT),
+                Style::default().fg(*ACCENT),
             ));
             spans.push(Span::styled(
                 truncate(query, 18),
-                Style::default().fg(MUTED),
+                Style::default().fg(*MUTED),
             ));
         }
         frame.render_widget(Paragraph::new(Line::from(spans)), sections[1]);
@@ -129,10 +132,10 @@ fn draw_home_menu(frame: &mut Frame, area: Rect, app: &mut App) {
             ListItem::new(Line::from(vec![
                 Span::styled(
                     format!("{:>2}  ", item.key),
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                    Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(format!("{:<17}", item.title), Style::default().fg(TEXT)),
-                Span::styled(item.description, Style::default().fg(MUTED)),
+                Span::styled(format!("{:<17}", item.title), Style::default().fg(*TEXT)),
+                Span::styled(item.description, Style::default().fg(*MUTED)),
             ]))
         })
         .collect();
@@ -160,10 +163,10 @@ fn draw_browse(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
 
     let right = if app.loading {
         Line::from(vec![
-            Span::styled(app.spinner_frame(now), Style::default().fg(ACCENT)),
+            Span::styled(app.spinner_frame(now), Style::default().fg(*ACCENT)),
             Span::styled(
                 format!(" {}", truncate(&app.loading_label, 24)),
-                Style::default().fg(MUTED),
+                Style::default().fg(*MUTED),
             ),
         ])
     } else if app.feed.subtitle.is_empty() {
@@ -171,7 +174,7 @@ fn draw_browse(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
     } else {
         Line::from(Span::styled(
             truncate(&app.feed.subtitle, 28),
-            Style::default().fg(MUTED),
+            Style::default().fg(*MUTED),
         ))
     };
     frame.render_widget(
@@ -213,13 +216,13 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
     let header = Row::new({
         let mut cells = vec![
             Cell::from(""),
-            Cell::from(Span::styled("title", Style::default().fg(MUTED))),
-            Cell::from(Span::styled("len", Style::default().fg(MUTED))),
+            Cell::from(Span::styled("title", Style::default().fg(*MUTED))),
+            Cell::from(Span::styled("len", Style::default().fg(*MUTED))),
         ];
         if show_views {
             cells.push(Cell::from(Span::styled(
                 "views",
-                Style::default().fg(MUTED),
+                Style::default().fg(*MUTED),
             )));
         }
         cells
@@ -237,36 +240,36 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
         .map(|(index, video)| {
             let mut title_spans = vec![Span::styled(
                 truncate(&video.title, title_width.max(8)),
-                Style::default().fg(TEXT),
+                Style::default().fg(*TEXT),
             )];
             if video.is_live() {
-                title_spans.push(Span::styled(" live", Style::default().fg(ERROR)));
+                title_spans.push(Span::styled(" live", Style::default().fg(*ERROR)));
             }
             if app.store.is_liked(&video.id) {
-                title_spans.push(Span::styled(" ♥", Style::default().fg(ERROR)));
+                title_spans.push(Span::styled(" ♥", Style::default().fg(*ERROR)));
             }
             if app.store.is_watch_later(&video.id) {
-                title_spans.push(Span::styled(" »", Style::default().fg(WARN)));
+                title_spans.push(Span::styled(" »", Style::default().fg(*WARN)));
             }
             if app.store.is_saved(&video.id) {
-                title_spans.push(Span::styled(" ·", Style::default().fg(ACCENT)));
+                title_spans.push(Span::styled(" ·", Style::default().fg(*ACCENT)));
             }
 
             let mut cells = vec![
                 Cell::from(Span::styled(
                     format!("{:>2}", index + 1),
-                    Style::default().fg(MUTED),
+                    Style::default().fg(*MUTED),
                 )),
                 Cell::from(Line::from(title_spans)),
                 Cell::from(Span::styled(
                     format_duration(video.duration),
-                    Style::default().fg(MUTED),
+                    Style::default().fg(*MUTED),
                 )),
             ];
             if show_views {
                 cells.push(Cell::from(Span::styled(
                     format_views(video.view_count),
-                    Style::default().fg(MUTED),
+                    Style::default().fg(*MUTED),
                 )));
             }
             Row::new(cells)
@@ -291,7 +294,7 @@ fn draw_empty(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     };
     let lines = vec![Line::from(Span::styled(
         truncate(&message, area.width.saturating_sub(4) as usize),
-        Style::default().fg(MUTED),
+        Style::default().fg(*MUTED),
     ))];
     let chunks = Layout::vertical([
         Constraint::Fill(1),
@@ -339,25 +342,25 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
     if video.is_live() {
         lines.push(Line::from(Span::styled(
             "live",
-            Style::default().fg(ERROR).add_modifier(Modifier::BOLD),
+            Style::default().fg(*ERROR).add_modifier(Modifier::BOLD),
         )));
     }
     if app.store.is_liked(&video.id) {
         lines.push(Line::from(Span::styled(
             "liked",
-            Style::default().fg(ERROR).add_modifier(Modifier::BOLD),
+            Style::default().fg(*ERROR).add_modifier(Modifier::BOLD),
         )));
     }
     if app.store.is_watch_later(&video.id) {
         lines.push(Line::from(Span::styled(
             "watch later",
-            Style::default().fg(WARN).add_modifier(Modifier::BOLD),
+            Style::default().fg(*WARN).add_modifier(Modifier::BOLD),
         )));
     }
     if app.store.is_saved(&video.id) {
         lines.push(Line::from(Span::styled(
             "saved",
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
         )));
     }
     if !lines.is_empty() {
@@ -371,7 +374,7 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         video.channel.clone(),
-        Style::default().fg(MUTED),
+        Style::default().fg(*MUTED),
     )));
     lines.push(Line::from(Span::styled(
         format!(
@@ -380,28 +383,28 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
             format_views(video.view_count),
             relative_time(video.timestamp)
         ),
-        Style::default().fg(MUTED),
+        Style::default().fg(*MUTED),
     )));
     lines.push(Line::from(Span::styled(
         video
             .upload_date
             .clone()
             .unwrap_or_else(|| format_date(video.timestamp)),
-        Style::default().fg(MUTED),
+        Style::default().fg(*MUTED),
     )));
 
     if let Some(description) = &video.description {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             truncate(description, 360),
-            Style::default().fg(MUTED),
+            Style::default().fg(*MUTED),
         )));
     }
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         truncate(&video.url, inner.width.saturating_sub(2) as usize),
-        Style::default().fg(MUTED),
+        Style::default().fg(*MUTED),
     )));
 
     frame.render_widget(
@@ -456,20 +459,20 @@ fn draw_settings(frame: &mut Frame, area: Rect, app: &App) {
         section("about"),
         Line::from(Span::styled(
             format!("utui v{}", env!("CARGO_PKG_VERSION")),
-            Style::default().fg(TEXT),
+            Style::default().fg(*TEXT),
         )),
         Line::from(Span::styled(
             "native Rust · yt-dlp · mpv",
-            Style::default().fg(MUTED),
+            Style::default().fg(*MUTED),
         )),
         Line::from(""),
         Line::from(vec![
             key("e"),
-            Span::styled(" edit config  ", Style::default().fg(MUTED)),
+            Span::styled(" edit config  ", Style::default().fg(*MUTED)),
             key("o"),
-            Span::styled(" downloads  ", Style::default().fg(MUTED)),
+            Span::styled(" downloads  ", Style::default().fg(*MUTED)),
             key("r"),
-            Span::styled(" reload", Style::default().fg(MUTED)),
+            Span::styled(" reload", Style::default().fg(*MUTED)),
         ]),
     ];
 
@@ -519,15 +522,15 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
             ToastKind::Error => "! ",
         };
         let color = match toast.kind {
-            ToastKind::Info => MUTED,
-            ToastKind::Success => SUCCESS,
-            ToastKind::Error => ERROR,
+            ToastKind::Info => *MUTED,
+            ToastKind::Success => *SUCCESS,
+            ToastKind::Error => *ERROR,
         };
         (format!("{prefix}{}", toast.text), color)
     } else if let Some(download) = &app.download {
         (
             format!("↓ {}%  {}", download.percent, truncate(&download.title, 34)),
-            WARN,
+            *WARN,
         )
     } else {
         (
@@ -536,7 +539,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
                 app.store.saved.len(),
                 app.store.history.len()
             ),
-            MUTED,
+            *MUTED,
         )
     };
 
@@ -571,11 +574,13 @@ fn draw_prompt(frame: &mut Frame, area: Rect, input: &TextInput) {
     let mut spans = vec![
         Span::styled(
             prefix.to_string(),
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             input.value.clone(),
-            Style::default().fg(TEXT).add_modifier(Modifier::UNDERLINED),
+            Style::default()
+                .fg(*TEXT)
+                .add_modifier(Modifier::UNDERLINED),
         ),
     ];
     // Extend the underline across the row so the input reads as a field.
@@ -607,7 +612,7 @@ fn draw_prompt(frame: &mut Frame, area: Rect, input: &TextInput) {
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 truncate(&hint, rect.width.saturating_sub(2) as usize),
-                Style::default().fg(MUTED),
+                Style::default().fg(*MUTED),
             ))),
             Rect::new(rect.x, rect.y + 1, rect.width, 1),
         );
@@ -633,7 +638,7 @@ fn draw_actions(frame: &mut Frame, area: Rect, app: &App, index: usize, actions:
         .map(|video| truncate(&video.title, width.saturating_sub(2) as usize))
         .unwrap_or_else(|| "actions".to_string());
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(title, Style::default().fg(MUTED)))),
+        Paragraph::new(Line::from(Span::styled(title, Style::default().fg(*MUTED)))),
         sections[0],
     );
 
@@ -643,9 +648,9 @@ fn draw_actions(frame: &mut Frame, area: Rect, app: &App, index: usize, actions:
             ListItem::new(Line::from(vec![
                 Span::styled(
                     format!("{:>2}  ", action.key),
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                    Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(action.label, Style::default().fg(TEXT)),
+                Span::styled(action.label, Style::default().fg(*TEXT)),
             ]))
         })
         .collect();
@@ -672,7 +677,7 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         hint_line(&[("/", "search"), ("?", "help"), ("q", "quit")]),
         Line::from(Span::styled(
             "search accepts queries, colon filters, and plain URLs",
-            Style::default().fg(MUTED),
+            Style::default().fg(*MUTED),
         )),
         Line::from(""),
         section("browse"),
@@ -697,45 +702,45 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         section("filters"),
         Line::from(Span::styled(
             filter_names(0, 10),
-            Style::default().fg(MUTED),
+            Style::default().fg(*MUTED),
         )),
         Line::from(Span::styled(
             filter_names(10, 21),
-            Style::default().fg(MUTED),
+            Style::default().fg(*MUTED),
         )),
         Line::from(Span::styled(
             "recall  !1  !2  !3",
-            Style::default().fg(MUTED),
+            Style::default().fg(*MUTED),
         )),
         Line::from(""),
         section("cookies"),
         Line::from(Span::styled(
             "set cookies_browser in config.toml for subscriptions,",
-            Style::default().fg(MUTED),
+            Style::default().fg(*MUTED),
         )),
         Line::from(Span::styled(
             "watch later, and liked videos",
-            Style::default().fg(MUTED),
+            Style::default().fg(*MUTED),
         )),
         Line::from(""),
         section("account"),
         Line::from(Span::styled(
             "l and W write real likes / Watch Later to your YouTube",
-            Style::default().fg(MUTED),
+            Style::default().fg(*MUTED),
         )),
         Line::from(Span::styled(
             "account when cookies_browser is set (account_sync = true);",
-            Style::default().fg(MUTED),
+            Style::default().fg(*MUTED),
         )),
         Line::from(Span::styled(
             "otherwise they toggle local mirrors only",
-            Style::default().fg(MUTED),
+            Style::default().fg(*MUTED),
         )),
         Line::from(""),
         section("downloads"),
         Line::from(Span::styled(
             "download_dir/video and download_dir/audio",
-            Style::default().fg(MUTED),
+            Style::default().fg(*MUTED),
         )),
     ];
     frame.render_widget(
@@ -747,7 +752,7 @@ fn draw_help(frame: &mut Frame, area: Rect) {
 fn key(value: &'static str) -> Span<'static> {
     Span::styled(
         value,
-        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
     )
 }
 
@@ -755,15 +760,15 @@ fn hint_line(hints: &[(&str, &str)]) -> Line<'static> {
     let mut spans = Vec::new();
     for (index, (key_value, label)) in hints.iter().enumerate() {
         if index > 0 {
-            spans.push(Span::styled("  ", Style::default().fg(MUTED)));
+            spans.push(Span::styled("  ", Style::default().fg(*MUTED)));
         }
         spans.push(Span::styled(
             (*key_value).to_string(),
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(
             format!(" {label}"),
-            Style::default().fg(MUTED),
+            Style::default().fg(*MUTED),
         ));
     }
     Line::from(spans)
@@ -772,14 +777,14 @@ fn hint_line(hints: &[(&str, &str)]) -> Line<'static> {
 fn section(label: &'static str) -> Line<'static> {
     Line::from(Span::styled(
         label,
-        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
     ))
 }
 
 fn kv(label: &str, value: &str) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{label:<12}"), Style::default().fg(MUTED)),
-        Span::styled(value.to_string(), Style::default().fg(TEXT)),
+        Span::styled(format!("{label:<12}"), Style::default().fg(*MUTED)),
+        Span::styled(value.to_string(), Style::default().fg(*TEXT)),
     ])
 }
 
