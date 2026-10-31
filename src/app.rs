@@ -711,6 +711,12 @@ impl App {
         if let Some(index) = visible_home_items().position(|other| other.key == item.key) {
             self.home_index = index;
         }
+        // Feed jumps land on Home (the bar lives there). From Browse the feed
+        // you were on is pushed so `b` can return to it.
+        if self.view == View::Browse && !self.feed.items.is_empty() {
+            self.stack.push(self.feed.clone());
+        }
+        self.view = View::Home;
         match item.action {
             HomeAction::Remote { title, url, auth } => {
                 self.home_origin = Some(item.key);
@@ -754,7 +760,7 @@ impl App {
             kind: FeedKind::Saved,
             subtitle: format!("{} VIDEOS", items.len()),
             notice: if items.is_empty() {
-                Some("Nothing saved yet. Press `s` on a result to keep it here.".to_string())
+                Some("Nothing saved yet. Press `a` on a result to keep it here.".to_string())
             } else {
                 None
             },
@@ -840,7 +846,7 @@ impl App {
                 items: Vec::new(),
                 notice: Some(
                     "This feed needs YouTube cookies. Set `cookies_browser = \"firefox\"` \
-                     (or another browser) in config.toml, then press `r`."
+                     (or another browser) in config.toml, then press `R`."
                         .to_string(),
                 ),
                 auth: true,
@@ -922,70 +928,78 @@ impl App {
             _ => {}
         }
 
-        match self.view {
-            View::Home => self.handle_home_key(key),
-            View::Browse => self.handle_browse_key(key),
-        }
+        self.handle_list_key(key);
     }
 
-    fn handle_home_key(&mut self, key: KeyEvent) {
+    /// One key map for both list views (Home and Browse), aligned with the
+    /// ytmtui bindings: Enter/Space play, `m` opens the action menu, `a` adds,
+    /// `r` removes, `L` likes, `1`-`5` jump to the feeds.
+    fn handle_list_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('h') => {
+            // Navigation: arrows, j/k, n/p (next/previous), g/G, paging.
+            KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h' | 'p') => {
                 self.move_selection(-1);
             }
-            KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
+            KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'n') | KeyCode::Tab => {
                 self.move_selection(1);
             }
             KeyCode::PageUp => self.move_selection(-10),
             KeyCode::PageDown => self.move_selection(10),
             KeyCode::Home | KeyCode::Char('g') => self.select_first(),
             KeyCode::End | KeyCode::Char('G') => self.select_last(),
+
+            // Play, ytmtui style: Enter or Space. On an empty Home, Enter
+            // opens the highlighted bar cell instead.
             KeyCode::Enter => {
                 if !self.feed.items.is_empty() {
-                    self.open_actions();
-                } else {
+                    self.play_selected(false);
+                } else if self.view == View::Home {
                     self.open_visible_home_item(self.home_index);
                 }
             }
-            KeyCode::Esc if self.loading => self.cancel_pending_fetch(),
-            // Quick list actions mirror Browse; the bar owns f/w/l/S/H.
-            KeyCode::Char('p' | 'a' | 'd' | 'D' | 's' | 'c' | 'y' | 'o' | 'r' | 'W') => {
-                self.handle_browse_key(key);
-            }
-            KeyCode::Char('b') if !self.stack.is_empty() => self.handle_browse_key(key),
-            KeyCode::Char('f') => self.open_home_item_by_key("f"),
-            KeyCode::Char('w') => self.open_home_item_by_key("w"),
-            KeyCode::Char('l') => self.open_home_item_by_key("l"),
-            KeyCode::Char('S') => self.open_home_item_by_key("S"),
-            KeyCode::Char('H') => self.open_home_item_by_key("H"),
-            KeyCode::Char('q') => self.quit = true,
-            _ => {}
-        }
-    }
+            KeyCode::Char(' ') => self.play_selected(false),
 
-    fn handle_browse_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
-            KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
-            KeyCode::PageUp => self.move_selection(-10),
-            KeyCode::PageDown => self.move_selection(10),
-            KeyCode::Home | KeyCode::Char('g') => self.select_first(),
-            KeyCode::End | KeyCode::Char('G') => self.select_last(),
-            KeyCode::Enter => self.open_actions(),
-            KeyCode::Char('p') => self.play_selected(false),
-            KeyCode::Char('a') => self.play_selected(true),
+            // The action menu moved off Enter, which now plays.
+            KeyCode::Char('m') => self.open_actions(),
+
+            // Feed jumps by letter (the home bar) or by digit, like ytmtui's
+            // 1-5 section jumps: Watch Later, Liked, Saved, History, Subs.
+            KeyCode::Char(letter @ ('f' | 'w' | 'l' | 'S' | 'H')) => {
+                self.open_home_item_by_key(&letter.to_string())
+            }
+            KeyCode::Char(digit @ '1'..='5') => {
+                let index = digit as usize - '1' as usize;
+                if let Some(item) = HOME_ITEMS.get(index) {
+                    self.open_home_entry(item);
+                }
+            }
+
+            // Library keys with ytmtui semantics: a adds (s also saves),
+            // r removes from Saved, L likes.
+            KeyCode::Char('a' | 's') => self.toggle_selected_saved(),
+            KeyCode::Char('r') => self.remove_selected_saved(),
+            KeyCode::Char('L') => self.toggle_like_selected(),
+            KeyCode::Char('W') => self.toggle_watch_later_selected(),
+
+            // The rest of the video actions.
+            KeyCode::Char('A') => self.play_selected(true),
             KeyCode::Char('d') => self.download_selected(false),
             KeyCode::Char('D') => self.download_selected(true),
-            KeyCode::Char('s') => self.toggle_selected_saved(),
+            KeyCode::Char('R') => self.refresh(),
             KeyCode::Char('c') => self.open_selected_channel(),
-            KeyCode::Char('l') => self.toggle_like_selected(),
-            KeyCode::Char('W') => self.toggle_watch_later_selected(),
-            KeyCode::Char('w') => self.open_watch_later_page(),
             KeyCode::Char('y') => self.copy_selected_url(),
             KeyCode::Char('o') => self.open_selected_browser(),
-            KeyCode::Char('r') => self.refresh(),
-            KeyCode::Char('b') | KeyCode::Esc => self.back(),
-            KeyCode::Tab => self.open_actions(),
+
+            // Back only where there is somewhere to go back to; Esc cancels a
+            // running fetch first, then steps back.
+            KeyCode::Char('b') if !self.stack.is_empty() => self.back(),
+            KeyCode::Esc => {
+                if self.loading {
+                    self.cancel_pending_fetch();
+                } else if !self.stack.is_empty() || self.view == View::Browse {
+                    self.back();
+                }
+            }
             _ => {}
         }
     }
@@ -1123,18 +1137,7 @@ impl App {
         };
         let saved = self.store.toggle_saved(&video);
         let _ = self.persist();
-        if self.feed.kind == FeedKind::Saved && !saved {
-            if let Some(position) = self.feed.items.iter().position(|item| item.id == video.id) {
-                self.feed.items.remove(position);
-                self.feed.subtitle = format!("{} VIDEOS", self.feed.items.len());
-                if self.feed.items.is_empty() {
-                    self.feed.notice = Some(
-                        "Nothing saved yet. Press `s` on a result to keep it here.".to_string(),
-                    );
-                }
-                self.fix_selection_after_removal();
-            }
-        }
+        self.prune_saved_feed(&video.id);
         if saved {
             self.toast_success("Saved to your collection");
         } else {
@@ -1142,8 +1145,40 @@ impl App {
         }
     }
 
-    /// Like state lives on the account when syncing is on: press `l` to like,
-    /// `l` again to unlike. The local store mirrors the account state.
+    /// `r` removes the selected video from Saved (ytmtui's remove key) and
+    /// says so when it is not saved in the first place.
+    fn remove_selected_saved(&mut self) {
+        let Some(video) = self.selected_video().cloned() else {
+            return;
+        };
+        if !self.store.is_saved(&video.id) {
+            self.toast_info("Not in saved videos");
+            return;
+        }
+        self.store.toggle_saved(&video);
+        let _ = self.persist();
+        self.prune_saved_feed(&video.id);
+        self.toast_info("Removed from saved videos");
+    }
+
+    /// Drop a video from the visible Saved feed when it just left the store.
+    fn prune_saved_feed(&mut self, video_id: &str) {
+        if self.feed.kind != FeedKind::Saved || self.store.is_saved(video_id) {
+            return;
+        }
+        if let Some(position) = self.feed.items.iter().position(|item| item.id == video_id) {
+            self.feed.items.remove(position);
+            self.feed.subtitle = format!("{} VIDEOS", self.feed.items.len());
+            if self.feed.items.is_empty() {
+                self.feed.notice =
+                    Some("Nothing saved yet. Press `a` on a result to keep it here.".to_string());
+            }
+            self.fix_selection_after_removal();
+        }
+    }
+
+    /// Like state lives on the account when syncing is on: press `L` to like,
+    /// `L` again to unlike. The local store mirrors the account state.
     fn toggle_like_selected(&mut self) {
         let Some(video) = self.selected_video().cloned() else {
             return;
@@ -1227,21 +1262,6 @@ impl App {
 
     fn feed_is_liked_page(&self) -> bool {
         self.feed.source.contains("list=LL")
-    }
-
-    /// `w` opens the account's real Watch Later page (cookie-backed).
-    fn open_watch_later_page(&mut self) {
-        self.home_origin = None;
-        self.request_feed(
-            "https://www.youtube.com/playlist?list=WL".to_string(),
-            "Watch Later".to_string(),
-            "YOUTUBE · COOKIES".to_string(),
-            FeedKind::Remote,
-            true,
-            true,
-            false,
-            self.view,
-        );
     }
 
     fn open_selected_channel(&mut self) {
@@ -1597,8 +1617,8 @@ impl App {
 
 fn build_actions(video: &Video, saved: bool) -> Vec<Action> {
     let mut actions = vec![
-        Action::new(ActionKind::Play, "Play video", "p"),
-        Action::new(ActionKind::PlayAudio, "Play audio only", "a"),
+        Action::new(ActionKind::Play, "Play video", "↵"),
+        Action::new(ActionKind::PlayAudio, "Play audio only", "A"),
         Action::new(ActionKind::Download, "Download video", "d"),
         Action::new(ActionKind::DownloadAudio, "Download audio", "D"),
     ];
@@ -1612,11 +1632,11 @@ fn build_actions(video: &Video, saved: bool) -> Vec<Action> {
         } else {
             "Save video"
         },
-        "s",
+        "a",
     ));
     actions.push(Action::new(ActionKind::CopyUrl, "Copy URL", "y"));
     actions.push(Action::new(ActionKind::Browser, "Open in browser", "o"));
-    actions.push(Action::new(ActionKind::Refresh, "Refresh feed", "r"));
+    actions.push(Action::new(ActionKind::Refresh, "Refresh feed", "R"));
     actions.push(Action::new(ActionKind::Back, "Back", "b"));
     actions
 }

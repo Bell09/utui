@@ -389,34 +389,19 @@ fn thumbnail_rows(app: &App, inner: Rect) -> u16 {
 fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     let chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Length(48)]).split(area);
 
-    let hints: &[(&str, &str)] = match app.view {
-        View::Home => &[
-            ("j/k", "move"),
-            ("enter", "open"),
-            ("p", "play"),
-            ("s", "save"),
-            ("w/S/H", "feeds"),
-            ("/", "search"),
-            ("b", "back"),
-            ("?", "help"),
-            ("q", "quit"),
-        ],
-        View::Browse => &[
-            ("j/k", "move"),
-            ("g/G", "first/last"),
-            ("enter", "actions"),
-            ("p", "play"),
-            ("a", "audio"),
-            ("d", "download"),
-            ("l", "like"),
-            ("W", "later"),
-            ("s", "save"),
-            ("/", "search"),
-            ("b", "back"),
-            ("?", "help"),
-            ("q", "quit"),
-        ],
-    };
+    // One hint line for both views — they share a key map now. Kept under
+    // ~80 columns so the line survives next to the 48-column toast area.
+    let hints: &[(&str, &str)] = &[
+        ("j/k", "move"),
+        ("enter", "play"),
+        ("m", "menu"),
+        ("a", "save"),
+        ("L", "like"),
+        ("1-5", "feeds"),
+        ("/", "search"),
+        ("?", "help"),
+        ("q", "quit"),
+    ];
     frame.render_widget(Paragraph::new(hint_line(hints)), chunks[0]);
 
     let (text, color) = if let Some(toast) = app.active_toast(now) {
@@ -561,29 +546,41 @@ fn draw_help(frame: &mut Frame, area: Rect) {
 
     let lines = vec![
         section("global"),
-        hint_line(&[("/", "search"), ("?", "help"), ("q", "quit")]),
+        hint_line(&[("/", "search"), ("m", "menu"), ("?", "help"), ("q", "quit")]),
         Line::from(Span::styled(
             "search accepts queries, colon filters, and plain URLs",
             Style::default().fg(*MUTED),
         )),
         Line::from(""),
-        section("browse"),
+        section("feeds"),
         hint_line(&[
-            ("j/k", "move"),
+            ("1", "watch later"),
+            ("2", "liked"),
+            ("3", "saved"),
+            ("4", "history"),
+            ("5", "subs"),
+        ]),
+        Line::from(Span::styled(
+            "same feeds by letter: w l S H f",
+            Style::default().fg(*MUTED),
+        )),
+        Line::from(""),
+        section("list"),
+        hint_line(&[
+            ("j/k/n/p", "move"),
             ("g/G", "first/last"),
-            ("enter", "actions"),
-            ("p", "play"),
-            ("a", "audio"),
-            ("d/D", "download"),
-            ("l", "like"),
+            ("enter/space", "play"),
+            ("a/s", "save"),
+            ("r", "remove"),
+            ("L", "like"),
             ("W", "later"),
-            ("w", "watch later page"),
-            ("s", "save"),
+            ("A", "audio"),
+            ("d/D", "download"),
             ("c", "channel"),
             ("y", "copy"),
             ("o", "open"),
-            ("r", "refresh"),
-            ("b", "back"),
+            ("R", "refresh"),
+            ("b/esc", "back"),
         ]),
         Line::from(""),
         section("filters"),
@@ -612,7 +609,7 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         Line::from(""),
         section("account"),
         Line::from(Span::styled(
-            "l and W write real likes / Watch Later to your YouTube",
+            "L and W write real likes / Watch Later to your YouTube",
             Style::default().fg(*MUTED),
         )),
         Line::from(Span::styled(

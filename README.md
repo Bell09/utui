@@ -74,8 +74,8 @@ The JSON output includes `title`, `source`, `count`, and an `items` array with t
 
 ## Playback and downloads
 
-- `p` or **Play video** opens `mpv` with the best video + audio stream.
-- `a` or **Play audio only** opens `mpv` with audio-only settings.
+- `Enter` or `Space` (or **Play video**) opens `mpv` with the best video + audio stream.
+- `A` or **Play audio only** opens `mpv` with audio-only settings.
 - `d` downloads video to `download_dir/video/`.
 - `D` downloads MP3 audio to `download_dir/audio/`.
 - The player and its arguments are fully configurable in `config.toml`.
@@ -101,14 +101,39 @@ Cookies are used only by `yt-dlp` and its cookie machinery (also by the account-
 
 ## Keybindings
 
+Home and Browse share one key map: navigation and playback follow the usual player conventions — `j`/`k` and the arrows navigate, `Enter`/`Space` play, `/` searches, `Esc` steps back.
+
 ### Global
 
 | Key | Action |
 | --- | --- |
 | `/` | Search (accepts queries, colon filters, and plain URLs) |
+| `m` | Action menu for the selected video |
 | `?` | Keybindings help |
 | `q` | Quit |
 | `Ctrl+C` | Quit |
+
+### Lists (Home and Browse)
+
+| Key | Action |
+| --- | --- |
+| `j` `n` `↓` `→` `Tab` | Move down |
+| `k` `h` `p` `↑` `←` | Move up |
+| `g` / `G` (or `Home` / `End`) | First / last result |
+| `PageUp` / `PageDown` | Page through results |
+| `Enter` / `Space` | Play the selected video |
+| `m` | Action menu (play, download, save, copy, …) |
+| `d` / `D` | Download video / audio |
+| `a` / `s` | Save or unsave the selected video |
+| `r` | Remove the selected video from Saved |
+| `L` | Like or unlike the selected video (YouTube account when syncing is on) |
+| `W` | Add to / remove from Watch Later (YouTube account when syncing is on) |
+| `A` | Play audio only |
+| `c` | Open the selected channel |
+| `y` | Copy the video URL |
+| `o` | Open in browser |
+| `R` | Refresh the current feed (bypasses cache) |
+| `b` / `Esc` | Back (with a stacked feed; `Esc` also cancels a running fetch) |
 
 ### Home
 
@@ -118,35 +143,13 @@ Watch Later, Liked videos, Saved videos, and History sit on the shortcut line ri
 
 When Utui opens it lands in the last-viewed feed (see *Feeds on launch* below), so content is on screen immediately, with the selected video's thumbnail and details in the preview pane.
 
-| Key | Action |
-| --- | --- |
-| `j` / `k` / `h` / `g` / `G` / `PageUp` / `PageDown` | Move through the list |
-| `Enter` | Action menu for the selected video; opens the highlighted feed when the list is empty |
-| `w` / `l` / `S` / `H` | Jump straight to Watch Later / Liked / Saved / History |
-| `p` `a` `d` `D` `s` `c` `y` `o` `r` `W` | Same quick actions as Browse |
-| `b` | Back (when a stacked feed is open) |
-| `f` | Subscriptions (cookie-backed; hidden shortcut) |
-
-### Browse
+The feeds jump like ytmtui's `1`–`5` section keys:
 
 | Key | Action |
 | --- | --- |
-| `j` / `k` | Move down / up |
-| `g` / `G` | First / last result |
-| `PageUp` / `PageDown` | Page through results |
-| `Enter` | Action menu |
-| `p` | Play video |
-| `a` | Play audio only |
-| `d` / `D` | Download video / audio |
-| `l` | Like or unlike the selected video (YouTube account when syncing is on) |
-| `W` | Add to / remove from Watch Later (YouTube account when syncing is on) |
-| `w` | Open your YouTube Watch Later page |
-| `s` | Save or remove the selected video |
-| `c` | Open the selected channel |
-| `y` | Copy the video URL |
-| `o` | Open in browser |
-| `r` | Refresh the current feed (bypasses cache) |
-| `b` / `Esc` | Back |
+| `1` / `2` / `3` / `4` / `5` | Watch Later / Liked / Saved / History / Subscriptions |
+| `w` / `l` / `S` / `H` / `f` | The same feeds by letter |
+| `Enter` with an empty list | Open the highlighted feed |
 
 ## Search filters
 
@@ -211,9 +214,9 @@ No file, no palette → your terminal's own defaults. `WAL_COLORS_FILE` override
 
 ## Account sync (real likes and Watch Later)
 
-With `cookies_browser` set and `account_sync = true`, the `l` and `W` keys act on your actual YouTube account, not just a local list:
+With `cookies_browser` set and `account_sync = true`, the `L` and `W` keys act on your actual YouTube account, not just a local list:
 
-- `l` likes the video; `l` again unlikes it.
+- `L` likes the video; `L` again unlikes it.
 - `W` adds the video to Watch Later; `W` again removes it.
 - `w` opens the Watch Later queue from your account. On that page `W` removes the item.
 
@@ -221,8 +224,8 @@ How it works: Utui ships a small embedded helper that reuses `yt-dlp`'s cookie e
 
 Notes:
 
-- YouTube does not let Utui read your current like state cheaply, so the first `l` on a video you already liked elsewhere will unlike it. Open the Liked page to see the truth.
-- Without `cookies_browser`, or with `account_sync = false`, `l` and `W` toggle local mirrors only (the `S` Saved-list equivalent lives locally) and a toast says so.
+- YouTube does not let Utui read your current like state cheaply, so the first `L` on a video you already liked elsewhere will unlike it. Open the Liked page to see the truth.
+- Without `cookies_browser`, or with `account_sync = false`, `L` and `W` toggle local mirrors only (the `S` Saved-list equivalent lives locally) and a toast says so.
 - Feeds for Watch Later and Liked videos remain read-through yt-dlp. After a successful sync on those pages, Utui refreshes the list automatically.
 
 ## How it compares to yt-x
