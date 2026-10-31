@@ -138,7 +138,7 @@ Home and Browse share one key map: navigation and playback follow the usual play
 
 ### Home
 
-The interface is compact by design: the search prompt with its decorative rule up top, one line of feed shortcuts, the list with its preview pane, and a status line — nothing else.
+The interface is compact by design: the search prompt with its decorative rule up top, one line of feed shortcuts, the list with its preview pane, and a status line — nothing else. The rule wears the same pywal color (color6) ytmtui paints its own, and the status line keeps the keybind guide pinned to the right with the message on the left.
 
 The search prompt is always visible in its own top row (placeholder: `/ search youtube · filters`). Press `/` to focus it — the row shows your query with a cursor and the status line switches to the live hint (`enter opens this url` once a URL is detected, `filter :…` once you type a colon filter).
 

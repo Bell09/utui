@@ -343,11 +343,9 @@ fn thumbnail_rows(app: &App, inner: Rect) -> u16 {
 }
 
 fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
-    let chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Length(48)]).split(area);
-
-    // One hint line for both views — they share a key map now. Kept under
-    // ~80 columns so the line survives next to the 48-column toast area.
-    // The feed bar on Home shows its letters by itself, so the 1-5 hint
+    // ytmtui footer layout: status message on the left, the keybind guide
+    // pinned to the right with its keys picked out in the accent.
+    // The feed bar on Home shows its digits by itself, so the 1-5 hint
     // only appears while there is no stacked feed to go back to.
     let mut hints: Vec<(&str, &str)> = vec![
         ("j/k", "move"),
@@ -362,8 +360,25 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
         hints.push(("1-5", "feeds"));
     }
     hints.extend_from_slice(&[("/", "search"), ("?", "help"), ("q", "quit")]);
-    // While the search row is focused it owns the hint area with its live
-    // "url vs query vs filter" guidance; otherwise the key map shows.
+
+    // Wide terminals keep the roomier two-space separator; narrow ones
+    // thin the guide instead so the message never drops below a few
+    // columns (the same budgeting ytmtui's footer does).
+    let separator = if area.width >= 128 { "  " } else { " " };
+    let (mut guide, mut guide_w) = guide_line(&hints, separator);
+    let budget = usize::from(area.width).saturating_sub(guide_w + 1);
+    if budget < 8 && hints.len() > 6 {
+        let (thinned, thinned_w) = guide_line(&hints[..6], separator);
+        if usize::from(area.width).saturating_sub(thinned_w + 1) > budget {
+            guide = thinned;
+            guide_w = thinned_w;
+        }
+    }
+    let chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Length(guide_w as u16 + 1)])
+        .split(area);
+
+    // Message left: live search guidance while the search row is focused,
+    // otherwise toast → download → fetch spinner → library counts.
     let left = if let Some(Overlay::Search(input)) = &app.overlay {
         let hint = if crate::app::App::looks_like_url(&input.value) {
             "enter opens this url  ·  esc cancel".to_string()
@@ -378,57 +393,51 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
             Style::default().fg(*MUTED),
         ))
     } else {
-        hint_line(&hints)
+        let (text, color) = if let Some(toast) = app.active_toast(now) {
+            let prefix = match toast.kind {
+                ToastKind::Info => "· ",
+                ToastKind::Success => "✓ ",
+                ToastKind::Error => "! ",
+            };
+            let color = match toast.kind {
+                ToastKind::Info => *MUTED,
+                ToastKind::Success => *SUCCESS,
+                ToastKind::Error => *ERROR,
+            };
+            (format!("{prefix}{}", toast.text), color)
+        } else if let Some(download) = &app.download {
+            (
+                format!("↓ {}%  {}", download.percent, truncate(&download.title, 34)),
+                *WARN,
+            )
+        } else if app.loading {
+            // The removed header used to carry the fetch spinner; keep it
+            // visible while a feed loads and no toast is up.
+            (
+                format!(
+                    "{} {}",
+                    app.spinner_frame(now),
+                    truncate(&app.loading_label, 30)
+                ),
+                *MUTED,
+            )
+        } else {
+            (
+                format!(
+                    "{} saved · {} history",
+                    app.store.saved.len(),
+                    app.store.history.len()
+                ),
+                *MUTED,
+            )
+        };
+        Line::from(Span::styled(
+            truncate(&text, chunks[0].width as usize),
+            Style::default().fg(color),
+        ))
     };
     frame.render_widget(Paragraph::new(left), chunks[0]);
-
-    let (text, color) = if let Some(toast) = app.active_toast(now) {
-        let prefix = match toast.kind {
-            ToastKind::Info => "· ",
-            ToastKind::Success => "✓ ",
-            ToastKind::Error => "! ",
-        };
-        let color = match toast.kind {
-            ToastKind::Info => *MUTED,
-            ToastKind::Success => *SUCCESS,
-            ToastKind::Error => *ERROR,
-        };
-        (format!("{prefix}{}", toast.text), color)
-    } else if let Some(download) = &app.download {
-        (
-            format!("↓ {}%  {}", download.percent, truncate(&download.title, 34)),
-            *WARN,
-        )
-    } else if app.loading {
-        // The removed header used to carry the fetch spinner; keep it visible
-        // on the right while a feed is loading and no toast is up.
-        (
-            format!(
-                "{} {}",
-                app.spinner_frame(now),
-                truncate(&app.loading_label, 30)
-            ),
-            *MUTED,
-        )
-    } else {
-        (
-            format!(
-                "{} saved · {} history",
-                app.store.saved.len(),
-                app.store.history.len()
-            ),
-            *MUTED,
-        )
-    };
-
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            truncate(&text, 47),
-            Style::default().fg(color),
-        )))
-        .alignment(Alignment::Right),
-        chunks[1],
-    );
+    frame.render_widget(Paragraph::new(guide).alignment(Alignment::Right), chunks[1]);
 }
 
 fn draw_overlay(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
@@ -502,7 +511,8 @@ fn draw_quality(frame: &mut Frame, area: Rect, app: &App, index: usize) {
 
 /// ytmtui-style decorative rule under the search input: one full copy of the
 /// motif (or the row width, whichever is shorter) so ultra-wide terminals
-/// keep its intended shape.
+/// keep its intended shape, painted in the same pywal color ytmtui uses for
+/// its rule (color6 / accent2).
 fn draw_rule(frame: &mut Frame, area: Rect) {
     if area.height == 0 || area.width == 0 {
         return;
@@ -512,7 +522,7 @@ fn draw_rule(frame: &mut Frame, area: Rect) {
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             rule,
-            Style::default().fg(*ACCENT).add_modifier(Modifier::DIM),
+            Style::default().fg(*ACCENT2),
         ))),
         Rect::new(area.x, area.y, area.width, 1),
     );
@@ -711,6 +721,34 @@ fn hint_line(hints: &[(&str, &str)]) -> Line<'static> {
         ));
     }
     Line::from(spans)
+}
+
+/// The right-side key guide (ytmtui footer style): key picked out in the
+/// accent bold, label muted, custom separator — returned with its rendered
+/// width so the status layout can budget the message next to it.
+fn guide_line(hints: &[(&str, &str)], separator: &str) -> (Line<'static>, usize) {
+    let mut spans = Vec::new();
+    let mut width = 0usize;
+    for (index, (key_value, label)) in hints.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(
+                separator.to_string(),
+                Style::default().fg(*MUTED),
+            ));
+            width += separator.chars().count();
+        }
+        spans.push(Span::styled(
+            (*key_value).to_string(),
+            Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
+        ));
+        width += key_value.chars().count();
+        spans.push(Span::styled(
+            format!(" {label}"),
+            Style::default().fg(*MUTED),
+        ));
+        width += 1 + label.chars().count();
+    }
+    (Line::from(spans), width)
 }
 
 fn section(label: &'static str) -> Line<'static> {

@@ -17,6 +17,9 @@ struct Theme {
     text: Color,
     muted: Color,
     accent: Color,
+    /// Second accent (pywal `color6`) — ytmtui's `accent2`, used for the
+    /// decorative rule under the search input.
+    accent2: Color,
     success: Color,
     warn: Color,
     error: Color,
@@ -31,6 +34,7 @@ impl Default for Theme {
             text: DEFAULT_TEXT,
             muted: DEFAULT_MUTED,
             accent: DEFAULT_ACCENT,
+            accent2: DEFAULT_ACCENT,
             success: DEFAULT_SUCCESS,
             warn: DEFAULT_WARN,
             error: DEFAULT_ERROR,
@@ -45,6 +49,7 @@ static THEME: LazyLock<Theme> = LazyLock::new(Theme::build);
 pub static TEXT: LazyLock<Color> = LazyLock::new(|| THEME.text);
 pub static MUTED: LazyLock<Color> = LazyLock::new(|| THEME.muted);
 pub static ACCENT: LazyLock<Color> = LazyLock::new(|| THEME.accent);
+pub static ACCENT2: LazyLock<Color> = LazyLock::new(|| THEME.accent2);
 pub static SUCCESS: LazyLock<Color> = LazyLock::new(|| THEME.success);
 pub static WARN: LazyLock<Color> = LazyLock::new(|| THEME.warn);
 pub static ERROR: LazyLock<Color> = LazyLock::new(|| THEME.error);
@@ -83,6 +88,7 @@ impl Theme {
             text: rgb(text, DEFAULT_TEXT),
             muted: rgb(hex("color8"), DEFAULT_MUTED),
             accent: rgb(hex("color4").or_else(|| hex("color6")), DEFAULT_ACCENT),
+            accent2: rgb(hex("color6").or_else(|| hex("color14")), DEFAULT_ACCENT),
             success: rgb(hex("color2"), DEFAULT_SUCCESS),
             warn: rgb(hex("color3"), DEFAULT_WARN),
             error: rgb(hex("color1"), DEFAULT_ERROR),
