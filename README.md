@@ -8,7 +8,7 @@ It reimplements the `yt-x` workflow as a single native binary: no shell script, 
 
 - **Native TUI** — ratatui + crossterm with a minimal, terminal-default palette and a single accent color. No external launcher.
 - **Fast search** — one `yt-dlp --flat-playlist --dump-single-json` call, parsed in-process and cached for 10 minutes.
-- **Thumbnails** — the selected video's thumbnail renders in the details pane using kitty, sixel, or iTerm2 graphics when the terminal supports them, with unicode half-blocks as fallback. Downloads are cached in `~/.cache/utui/thumbs`.
+- **Thumbnails** — the selected video's thumbnail renders in the preview pane beside the list using kitty, sixel, or iTerm2 graphics when the terminal supports them, with unicode half-blocks as fallback. Downloads are cached in `~/.cache/utui/thumbs`.
 - **Search filters** — YouTube's colon syntax: `:today`, `:week`, `:4k`, `:hd`, `:live`, `:short`, `:newest`, `:views`, and more.
 - **Search recall** — `!1`, `!2`, … replay previous searches.
 - **Channels and playlists** — open a channel from any result or paste any yt-dlp URL.
@@ -112,15 +112,19 @@ Cookies are used only by `yt-dlp` and its cookie machinery (also by the account-
 
 ### Home
 
-Watch Later, Liked videos, Saved videos, and History sit in a single horizontal bar of bordered cells right under the header. Subscriptions stays reachable via the hidden `f` shortcut (and via last-feed restore).
+The interface is compact by design: one header row (feed title, item count, subtitle), one line of feed shortcuts, the list with its preview pane, and a status line — nothing else.
 
-When Utui opens it lands in the last-viewed feed (see *Feeds on launch* below); the bar sits above the list.
+Watch Later, Liked videos, Saved videos, and History sit on the shortcut line right under the header (` w Watch Later  ·  l Liked videos  ·  S Saved videos  ·  H History`); the entry for the feed you have open is highlighted in the accent color. Subscriptions stays reachable via the hidden `f` shortcut (and via last-feed restore).
+
+When Utui opens it lands in the last-viewed feed (see *Feeds on launch* below), so content is on screen immediately, with the selected video's thumbnail and details in the preview pane.
 
 | Key | Action |
 | --- | --- |
-| `j` / `k` / `h` / `g` / `G` / `←` / `→` / `Tab` | Move through the list or between cells |
-| `Enter` | Open the selected cell when the list is empty, action menu when a feed is shown |
+| `j` / `k` / `h` / `g` / `G` / `PageUp` / `PageDown` | Move through the list |
+| `Enter` | Action menu for the selected video; opens the highlighted feed when the list is empty |
 | `w` / `l` / `S` / `H` | Jump straight to Watch Later / Liked / Saved / History |
+| `p` `a` `d` `D` `s` `c` `y` `o` `r` `W` | Same quick actions as Browse |
+| `b` | Back (when a stacked feed is open) |
 | `f` | Subscriptions (cookie-backed; hidden shortcut) |
 
 ### Browse

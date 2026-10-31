@@ -562,9 +562,6 @@ impl App {
     /// Make sure the details pane is loading the thumbnail for the current
     /// selection. Idempotent, so it is safe to call every frame.
     pub fn sync_thumbnail(&mut self) {
-        if self.view != View::Browse {
-            return;
-        }
         let Some(video) = self.selected_video() else {
             self.thumbnail = ThumbnailState::Idle;
             return;
@@ -607,7 +604,7 @@ impl App {
     }
 
     pub fn can_go_back(&self) -> bool {
-        self.view == View::Browse && !self.stack.is_empty()
+        !self.stack.is_empty()
     }
 
     pub fn current_title(&self) -> String {
@@ -709,6 +706,11 @@ impl App {
     }
 
     fn open_home_entry(&mut self, item: &'static HomeItem) {
+        // Highlight the bar entry whose feed is being opened, so the bar reads
+        // as "where you are". Hidden items (f) are not part of the bar.
+        if let Some(index) = visible_home_items().position(|other| other.key == item.key) {
+            self.home_index = index;
+        }
         match item.action {
             HomeAction::Remote { title, url, auth } => {
                 self.home_origin = Some(item.key);
@@ -794,7 +796,8 @@ impl App {
         self.fetch_id = self.fetch_id.wrapping_add(1);
         self.pending_fetch = None;
         self.loading = false;
-        self.view = View::Browse;
+        // Keep the caller's view: the bar opens these feeds in place on Home,
+        // while a refresh from Browse should stay in Browse.
         self.overlay = None;
         self.reset_selection();
         match self.feed.kind {
@@ -945,6 +948,11 @@ impl App {
                 }
             }
             KeyCode::Esc if self.loading => self.cancel_pending_fetch(),
+            // Quick list actions mirror Browse; the bar owns f/w/l/S/H.
+            KeyCode::Char('p' | 'a' | 'd' | 'D' | 's' | 'c' | 'y' | 'o' | 'r' | 'W') => {
+                self.handle_browse_key(key);
+            }
+            KeyCode::Char('b') if !self.stack.is_empty() => self.handle_browse_key(key),
             KeyCode::Char('f') => self.open_home_item_by_key("f"),
             KeyCode::Char('w') => self.open_home_item_by_key("w"),
             KeyCode::Char('l') => self.open_home_item_by_key("l"),
@@ -1348,7 +1356,8 @@ impl App {
         self.cancel_pending_fetch();
         if let Some(feed) = self.stack.pop() {
             self.feed = feed;
-            self.view = View::Browse;
+            // Keep the current view: popping from Home returns to Home with
+            // the bar intact; popping from Browse stays in Browse.
             self.overlay = None;
             self.reset_selection();
         } else {

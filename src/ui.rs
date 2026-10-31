@@ -8,8 +8,7 @@ use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
-    Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Padding, Paragraph, Row,
-    Table, Wrap,
+    Block, Cell, Clear, List, ListItem, ListState, Padding, Paragraph, Row, Table, Wrap,
 };
 use ratatui::Frame;
 use ratatui_image::StatefulImage;
@@ -22,7 +21,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
     }
     let layout = Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length(if app.view == View::Home { 3 } else { 0 }),
+        Constraint::Length(if app.view == View::Home { 1 } else { 0 }),
         Constraint::Min(0),
         Constraint::Length(1),
     ])
@@ -41,13 +40,17 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
-    let chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Length(28)]).split(area);
+    let chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Length(34)]).split(area);
 
+    // The header doubles as the feed title row: show the feed's title when one
+    // is loaded, otherwise the view name ("Home").
+    let title = if app.feed.title.is_empty() {
+        app.current_title()
+    } else {
+        app.feed.title.clone()
+    };
     let mut spans = vec![Span::styled(
-        truncate(
-            &app.current_title(),
-            chunks[0].width.saturating_sub(10) as usize,
-        ),
+        truncate(&title, chunks[0].width.saturating_sub(10) as usize),
         Style::default().fg(*TEXT).add_modifier(Modifier::BOLD),
     )];
     if app.can_go_back() {
@@ -59,68 +62,71 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
         Line::from(vec![
             Span::styled(app.spinner_frame(now), Style::default().fg(*ACCENT)),
             Span::styled(
-                format!(" {}", truncate(&app.loading_label, 22)),
+                format!(" {}", truncate(&app.loading_label, 30)),
                 Style::default().fg(*MUTED),
             ),
         ])
-    } else if app.view == View::Browse {
-        Line::from(Span::styled(
-            format!("{} items ", app.feed.items.len()),
-            Style::default().fg(*MUTED),
-        ))
     } else {
-        Line::from("")
+        let subtitle = app.feed.subtitle.trim();
+        let count = app.feed.items.len();
+        let text = if subtitle.is_empty() {
+            if count == 0 {
+                String::new()
+            } else {
+                format!("{count} items")
+            }
+        } else if count == 0 || subtitle.chars().any(|c| c.is_ascii_digit()) {
+            subtitle.to_string()
+        } else {
+            format!("{count} items · {subtitle}")
+        };
+        if text.is_empty() {
+            Line::from("")
+        } else {
+            Line::from(Span::styled(
+                truncate(&text, 32),
+                Style::default().fg(*MUTED),
+            ))
+        }
     };
     frame.render_widget(Paragraph::new(right).alignment(Alignment::Right), chunks[1]);
 }
 
 fn draw_home(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
-    let sections = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
+    let sections = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
 
     draw_home_menu(frame, sections[0], app);
     draw_feed_content(frame, sections[1], app, now);
 }
 
-/// One horizontal row of bordered cells, directly under the search prompt.
+/// One compact line of feed shortcuts directly under the header; the selected
+/// entry is highlighted in the accent color.
 fn draw_home_menu(frame: &mut Frame, area: Rect, app: &mut App) {
-    if area.height < 2 || area.width < 20 {
+    if area.height == 0 || area.width < 20 {
         return;
     }
 
     let items: Vec<&HomeItem> = visible_home_items().collect();
-    let count = items.len();
-    let widths: Vec<Constraint> = vec![Constraint::Ratio(1, count as u32); count];
-    let cells = Layout::horizontal(widths).spacing(1).split(area);
-
-    for (index, (item, cell)) in items.iter().zip(cells.iter()).enumerate() {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled("  ·  ", Style::default().fg(*MUTED)));
+        }
         let selected = index == app.home_index;
-        let (border, title, key) = if selected {
-            (
-                Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
-                Style::default().fg(*TEXT).add_modifier(Modifier::BOLD),
-                Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
-            )
+        let key_style = if selected {
+            Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD)
         } else {
-            (
-                Style::default().fg(*MUTED),
-                Style::default().fg(*TEXT),
-                Style::default().fg(*MUTED),
-            )
+            Style::default().fg(*MUTED)
         };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(border);
-        let line = Line::from(vec![
-            Span::styled(format!(" {} ", item.key), key),
-            Span::raw(" "),
-            Span::styled(item.title.to_string(), title),
-        ]);
-        frame.render_widget(
-            Paragraph::new(line).block(block).wrap(Wrap { trim: true }),
-            *cell,
-        );
+        let title_style = if selected {
+            Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(*TEXT)
+        };
+        spans.push(Span::styled(format!(" {}", item.key), key_style));
+        spans.push(Span::styled(format!(" {}", item.title), title_style));
     }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn draw_browse(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
@@ -128,51 +134,19 @@ fn draw_browse(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
 }
 
 fn draw_feed_content(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
-    let sections = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
-
-    let title = truncate(
-        &app.feed.title,
-        sections[0].width.saturating_sub(30) as usize,
-    );
-    let left = Line::from(Span::styled(
-        title,
-        Style::default().add_modifier(Modifier::BOLD),
-    ));
-    frame.render_widget(Paragraph::new(left), sections[0]);
-
-    let right = if app.loading {
-        Line::from(vec![
-            Span::styled(app.spinner_frame(now), Style::default().fg(*ACCENT)),
-            Span::styled(
-                format!(" {}", truncate(&app.loading_label, 24)),
-                Style::default().fg(*MUTED),
-            ),
-        ])
-    } else if app.feed.subtitle.is_empty() {
-        Line::from("")
-    } else {
-        Line::from(Span::styled(
-            truncate(&app.feed.subtitle, 28),
-            Style::default().fg(*MUTED),
-        ))
-    };
-    frame.render_widget(
-        Paragraph::new(right).alignment(Alignment::Right),
-        sections[0],
-    );
-
-    let body = sections[1];
+    // The feed title, item count, and subtitle live in the shared header row
+    // (see draw_header); this area is list plus preview only.
     let selected = app.selected_video().cloned();
 
-    if body.width >= 100 {
-        let columns = Layout::horizontal([Constraint::Percentage(68), Constraint::Percentage(32)])
-            .split(body);
+    if area.width >= 88 {
+        let columns = Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)])
+            .split(area);
         draw_list(frame, columns[0], app, now);
         if let Some(video) = selected {
             draw_details(frame, columns[1], app, &video);
         }
     } else {
-        draw_list(frame, body, app, now);
+        draw_list(frame, area, app, now);
     }
 }
 
@@ -418,12 +392,10 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     let hints: &[(&str, &str)] = match app.view {
         View::Home => &[
             ("j/k", "move"),
-            ("g/G", "first/last"),
-            ("enter", "actions"),
+            ("enter", "open"),
             ("p", "play"),
-            ("a", "audio"),
-            ("d", "download"),
             ("s", "save"),
+            ("w/S/H", "feeds"),
             ("/", "search"),
             ("b", "back"),
             ("?", "help"),
