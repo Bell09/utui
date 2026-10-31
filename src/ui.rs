@@ -1,5 +1,5 @@
 use crate::app::{
-    visible_home_items, Action, App, HomeItem, Overlay, ThumbnailState, ToastKind, View,
+    visible_home_items, Action, App, HomeItem, Overlay, ThumbnailState, ToastKind, View, QUALITIES,
 };
 use crate::theme::*;
 use crate::util::{format_date, format_duration, format_views, relative_time, truncate};
@@ -14,6 +14,10 @@ use ratatui::Frame;
 use ratatui_image::StatefulImage;
 use std::time::Instant;
 
+/// The decorative underline motif under the search input — the same rule
+/// ytmtui draws below its own search line.
+const TOP_RULE: &str = "',─────,'───────',─────────,'─────────────'.────────────,'───────────`,──────────,'──────────,'─────────`,────────.`───────',──────',─────`,────.`───',──`.─";
+
 pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
     let area = frame.area();
     if bg_active() {
@@ -21,6 +25,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
     }
     let layout = Layout::vertical([
         Constraint::Length(1),                                          // search prompt
+        Constraint::Length(1),                                          // decorative rule
         Constraint::Length(if app.view == View::Home { 1 } else { 0 }), // feed bar
         Constraint::Min(0),                                             // list + preview
         Constraint::Length(1),                                          // status
@@ -28,11 +33,12 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
     .split(area);
 
     draw_search(frame, layout[0], app);
+    draw_rule(frame, layout[1]);
     match app.view {
-        View::Home => draw_home(frame, layout[2], app, now),
-        View::Browse => draw_browse(frame, layout[2], app, now),
+        View::Home => draw_home(frame, layout[3], app, now),
+        View::Browse => draw_browse(frame, layout[3], app, now),
     }
-    draw_status(frame, layout[3], app, now);
+    draw_status(frame, layout[4], app, now);
 
     if let Some(overlay) = &app.overlay {
         draw_overlay(frame, area, app, overlay);
@@ -70,7 +76,10 @@ fn draw_home_menu(frame: &mut Frame, area: Rect, app: &mut App) {
         } else {
             Style::default().fg(*TEXT)
         };
-        spans.push(Span::styled(format!(" {}", item.key), key_style));
+        // The bar shows the digit that jumps to each feed — w/l became
+        // toggles, so the letters no longer all work as shortcuts.
+        let hint = (index + 1).to_string();
+        spans.push(Span::styled(format!(" {hint}"), key_style));
         spans.push(Span::styled(format!(" {}", item.title), title_style));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -344,8 +353,8 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
         ("j/k", "move"),
         ("enter", "play"),
         ("m", "menu"),
-        ("a", "save"),
-        ("L", "like"),
+        ("s", "save"),
+        ("l", "like"),
     ];
     if app.can_go_back() {
         hints.push(("b", "back"));
@@ -428,8 +437,85 @@ fn draw_overlay(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
         // live hints take over the status line while it is focused.
         Overlay::Search(_) => {}
         Overlay::Actions { index, actions } => draw_actions(frame, area, app, *index, actions),
+        Overlay::Quality { index } => draw_quality(frame, area, app, *index),
         Overlay::Help => draw_help(frame, area),
     }
+}
+
+/// The `d` quality picker: a right-side panel (over the preview pane) listing
+/// the offered qualities; Enter downloads the highlighted one.
+fn draw_quality(frame: &mut Frame, area: Rect, app: &App, index: usize) {
+    if area.width < 20 || area.height < 4 {
+        return;
+    }
+    let width = (area.width / 4).clamp(22, 34);
+    let height = (QUALITIES.len() as u16 + 3).min(area.height.saturating_sub(1));
+    let rect = Rect::new(
+        area.right().saturating_sub(width),
+        area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    );
+    frame.render_widget(Clear, rect);
+
+    let sections = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .split(rect);
+    let title = app
+        .selected_video()
+        .map(|video| {
+            format!(
+                "quality · {}",
+                truncate(&video.title, width.saturating_sub(10) as usize)
+            )
+        })
+        .unwrap_or_else(|| "quality".to_string());
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(title, Style::default().fg(*MUTED)))),
+        sections[0],
+    );
+
+    let items: Vec<ListItem> = QUALITIES
+        .iter()
+        .map(|&(label, _)| {
+            ListItem::new(Line::from(Span::styled(label, Style::default().fg(*TEXT))))
+        })
+        .collect();
+    let mut state = ListState::default();
+    state.select(Some(index));
+    let list = List::new(items)
+        .highlight_symbol("▌ ")
+        .highlight_style(Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD));
+    frame.render_stateful_widget(list, sections[1], &mut state);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "enter download · esc",
+            Style::default().fg(*MUTED),
+        ))),
+        sections[2],
+    );
+}
+
+/// ytmtui-style decorative rule under the search input: one full copy of the
+/// motif (or the row width, whichever is shorter) so ultra-wide terminals
+/// keep its intended shape.
+fn draw_rule(frame: &mut Frame, area: Rect) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let width = usize::from(area.width).min(TOP_RULE.chars().count());
+    let rule: String = TOP_RULE.chars().take(width).collect();
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            rule,
+            Style::default().fg(*ACCENT).add_modifier(Modifier::DIM),
+        ))),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
 }
 
 /// The search prompt is part of the screen, not a popup: it sits in its own
@@ -536,7 +622,7 @@ fn draw_help(frame: &mut Frame, area: Rect) {
             ("5", "subs"),
         ]),
         Line::from(Span::styled(
-            "same feeds by letter: w l S H f",
+            "letters S H f still jump to saved · history · subs",
             Style::default().fg(*MUTED),
         )),
         Line::from(""),
@@ -545,12 +631,13 @@ fn draw_help(frame: &mut Frame, area: Rect) {
             ("j/k/n/p", "move"),
             ("g/G", "first/last"),
             ("enter/space", "play"),
-            ("a/s", "save"),
-            ("r", "remove"),
-            ("L", "like"),
-            ("W", "later"),
-            ("A", "audio"),
-            ("d/D", "download"),
+            ("s", "save/unsave"),
+            ("r", "remove saved"),
+            ("l", "like/unlike"),
+            ("w", "watch later"),
+            ("A", "audio only"),
+            ("d", "pick quality"),
+            ("D", "download audio"),
             ("c", "channel"),
             ("y", "copy"),
             ("o", "open"),
@@ -584,7 +671,7 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         Line::from(""),
         section("account"),
         Line::from(Span::styled(
-            "L and W write real likes / Watch Later to your YouTube",
+            "l and w write real likes / Watch Later to your YouTube",
             Style::default().fg(*MUTED),
         )),
         Line::from(Span::styled(

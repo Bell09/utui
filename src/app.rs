@@ -267,8 +267,23 @@ impl Action {
 pub enum Overlay {
     Search(TextInput),
     Actions { index: usize, actions: Vec<Action> },
+    Quality { index: usize },
     Help,
 }
+
+/// The `d` quality picker. Each entry is (label, yt-dlp `height<=` cap);
+/// a cap of 0 means no cap, i.e. the best format.
+pub const QUALITIES: &[(&str, u32)] = &[
+    ("best", 0),
+    ("2160p", 2160),
+    ("1440p", 1440),
+    ("1080p", 1080),
+    ("720p", 720),
+    ("480p", 480),
+    ("360p", 360),
+    ("250p", 250),
+    ("160p", 160),
+];
 
 #[derive(Debug)]
 pub enum Effect {
@@ -280,6 +295,8 @@ pub enum Effect {
         job_id: u64,
         video: Video,
         audio: bool,
+        /// yt-dlp `height<=` cap from the quality picker (None = best).
+        height: Option<u32>,
     },
     Copy(String),
     OpenUrl(String),
@@ -925,8 +942,9 @@ impl App {
     }
 
     /// One key map for both list views (Home and Browse), aligned with the
-    /// ytmtui bindings: Enter/Space play, `m` opens the action menu, `a` adds,
-    /// `r` removes, `L` likes, `1`-`5` jump to the feeds.
+    /// ytmtui bindings: Enter/Space play, `m` opens the action menu, `w`/`l`/`s`
+    /// toggle Watch Later / like / save, `d` picks a quality to download,
+    /// `1`-`5` jump to the feeds.
     fn handle_list_key(&mut self, key: KeyEvent) {
         match key.code {
             // Navigation: arrows, j/k, n/p (next/previous), g/G, paging.
@@ -955,9 +973,9 @@ impl App {
             // The action menu moved off Enter, which now plays.
             KeyCode::Char('m') => self.open_actions(),
 
-            // Feed jumps by letter (the home bar) or by digit, like ytmtui's
-            // 1-5 section jumps: Watch Later, Liked, Saved, History, Subs.
-            KeyCode::Char(letter @ ('f' | 'w' | 'l' | 'S' | 'H')) => {
+            // Feed jumps by digit (the home bar shows them); the leftover
+            // letters S/H/f still work. w and l are toggles now, not jumps.
+            KeyCode::Char(letter @ ('f' | 'S' | 'H')) => {
                 self.open_home_item_by_key(&letter.to_string())
             }
             KeyCode::Char(digit @ '1'..='5') => {
@@ -967,17 +985,18 @@ impl App {
                 }
             }
 
-            // Library keys with ytmtui semantics: a adds (s also saves),
-            // r removes from Saved, L likes.
+            // Library toggles on the highlighted video: w Watch Later (press
+            // again to unsave), l like/unlike, s save/unsave (a is an alias;
+            // uppercase W/L match the old keys), r removes from Saved.
+            KeyCode::Char('w' | 'W') => self.toggle_watch_later_selected(),
+            KeyCode::Char('l' | 'L') => self.toggle_like_selected(),
             KeyCode::Char('a' | 's') => self.toggle_selected_saved(),
             KeyCode::Char('r') => self.remove_selected_saved(),
-            KeyCode::Char('L') => self.toggle_like_selected(),
-            KeyCode::Char('W') => self.toggle_watch_later_selected(),
 
             // The rest of the video actions.
             KeyCode::Char('A') => self.play_selected(true),
-            KeyCode::Char('d') => self.download_selected(false),
-            KeyCode::Char('D') => self.download_selected(true),
+            KeyCode::Char('d') => self.open_quality(),
+            KeyCode::Char('D') => self.download_selected(true, None),
             KeyCode::Char('R') => self.refresh(),
             KeyCode::Char('c') => self.open_selected_channel(),
             KeyCode::Char('y') => self.copy_selected_url(),
@@ -1060,6 +1079,27 @@ impl App {
                     self.overlay = Some(Overlay::Actions { index, actions });
                 }
             },
+            Overlay::Quality { mut index } => match key.code {
+                KeyCode::Esc => {}
+                KeyCode::Up | KeyCode::Char('k') => {
+                    index = index.saturating_sub(1);
+                    self.overlay = Some(Overlay::Quality { index });
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    index = (index + 1).min(QUALITIES.len().saturating_sub(1));
+                    self.overlay = Some(Overlay::Quality { index });
+                }
+                KeyCode::Enter => {
+                    let height = QUALITIES
+                        .get(index)
+                        .map(|&(_, height)| height)
+                        .filter(|&height| height > 0);
+                    self.download_selected(false, height);
+                }
+                _ => {
+                    self.overlay = Some(Overlay::Quality { index });
+                }
+            },
             Overlay::Help => match key.code {
                 KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') | KeyCode::Enter => {}
                 _ => self.overlay = Some(Overlay::Help),
@@ -1071,8 +1111,8 @@ impl App {
         match kind {
             ActionKind::Play => self.play_selected(false),
             ActionKind::PlayAudio => self.play_selected(true),
-            ActionKind::Download => self.download_selected(false),
-            ActionKind::DownloadAudio => self.download_selected(true),
+            ActionKind::Download => self.open_quality(),
+            ActionKind::DownloadAudio => self.download_selected(true, None),
             ActionKind::Channel => self.open_selected_channel(),
             ActionKind::ToggleSave => self.toggle_selected_saved(),
             ActionKind::CopyUrl => self.copy_selected_url(),
@@ -1102,7 +1142,21 @@ impl App {
         self.pending_effect = Some(Effect::Play { video, audio });
     }
 
-    fn download_selected(&mut self, audio: bool) {
+    /// `d` and the menu's Download row open the quality picker on the right;
+    /// Enter on a row downloads with that height cap.
+    fn open_quality(&mut self) {
+        if self.download.is_some() {
+            self.toast_error("A download is already running");
+            return;
+        }
+        if self.selected_video().is_none() {
+            self.toast_info("Nothing selected");
+            return;
+        }
+        self.overlay = Some(Overlay::Quality { index: 0 });
+    }
+
+    fn download_selected(&mut self, audio: bool, height: Option<u32>) {
         if self.download.is_some() {
             self.toast_error("A download is already running");
             return;
@@ -1116,12 +1170,17 @@ impl App {
             job_id,
             video,
             audio,
+            height,
         });
-        self.toast_info(if audio {
-            "Downloading audio…"
+        let message = if audio {
+            "Downloading audio…".to_string()
         } else {
-            "Downloading video…"
-        });
+            match height {
+                Some(height) => format!("Downloading {height}p…"),
+                None => "Downloading video…".to_string(),
+            }
+        };
+        self.toast_info(message);
     }
 
     fn toggle_selected_saved(&mut self) {
@@ -1170,8 +1229,8 @@ impl App {
         }
     }
 
-    /// Like state lives on the account when syncing is on: press `L` to like,
-    /// `L` again to unlike. The local store mirrors the account state.
+    /// Like state lives on the account when syncing is on: press `l` to like,
+    /// `l` again to unlike. The local store mirrors the account state.
     fn toggle_like_selected(&mut self) {
         let Some(video) = self.selected_video().cloned() else {
             return;

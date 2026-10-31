@@ -76,7 +76,7 @@ The JSON output includes `title`, `source`, `count`, and an `items` array with t
 
 - `Enter` or `Space` (or **Play video**) opens `mpv` with the best video + audio stream.
 - `A` or **Play audio only** opens `mpv` with audio-only settings.
-- `d` downloads video to `download_dir/video/`.
+- `d` opens the quality picker on the right side (best / 2160p / 1440p / 1080p / 720p / 480p / 360p / 250p / 160p); `Enter` downloads that quality to `download_dir/video/`.
 - `D` downloads MP3 audio to `download_dir/audio/`.
 - The player and its arguments are fully configurable in `config.toml`.
 
@@ -123,11 +123,12 @@ Home and Browse share one key map: navigation and playback follow the usual play
 | `PageUp` / `PageDown` | Page through results |
 | `Enter` / `Space` | Play the selected video |
 | `m` | Action menu (play, download, save, copy, …) |
-| `d` / `D` | Download video / audio |
-| `a` / `s` | Save or unsave the selected video |
+| `d` | Open the quality picker (best / 2160p … 160p); `Enter` downloads it |
+| `D` | Download audio (MP3) |
+| `s` (or `a`) | Save or unsave the highlighted video |
 | `r` | Remove the selected video from Saved |
-| `L` | Like or unlike the selected video (YouTube account when syncing is on) |
-| `W` | Add to / remove from Watch Later (YouTube account when syncing is on) |
+| `l` (or `L`) | Like or unlike the highlighted video (YouTube account when syncing is on) |
+| `w` (or `W`) | Add the highlighted video to / remove it from Watch Later (YouTube account when syncing is on) |
 | `A` | Play audio only |
 | `c` | Open the selected channel |
 | `y` | Copy the video URL |
@@ -137,11 +138,11 @@ Home and Browse share one key map: navigation and playback follow the usual play
 
 ### Home
 
-The interface is compact by design: the search prompt up top, one line of feed shortcuts, the list with its preview pane, and a status line — nothing else.
+The interface is compact by design: the search prompt with its decorative rule up top, one line of feed shortcuts, the list with its preview pane, and a status line — nothing else.
 
 The search prompt is always visible in its own top row (placeholder: `/ search youtube · filters`). Press `/` to focus it — the row shows your query with a cursor and the status line switches to the live hint (`enter opens this url` once a URL is detected, `filter :…` once you type a colon filter).
 
-Watch Later, Liked videos, Saved videos, and History sit on the shortcut line right under the search prompt (` w Watch Later  ·  l Liked videos  ·  S Saved videos  ·  H History`); the entry for the feed you have open is highlighted in the accent color. Subscriptions stays reachable via the hidden `f` shortcut (and via last-feed restore).
+Watch Later, Liked videos, Saved videos, and History sit on the shortcut line right under the search rule (` 1 Watch Later  ·  2 Liked videos  ·  3 Saved videos  ·  4 History`); the entry for the feed you have open is highlighted in the accent color. Subscriptions stays reachable via `5` (and the hidden `f` shortcut, and via last-feed restore).
 
 When Utui opens it lands in the last-viewed feed (see *Feeds on launch* below), so content is on screen immediately, with the selected video's thumbnail and details in the preview pane.
 
@@ -150,7 +151,7 @@ The feeds jump like ytmtui's `1`–`5` section keys:
 | Key | Action |
 | --- | --- |
 | `1` / `2` / `3` / `4` / `5` | Watch Later / Liked / Saved / History / Subscriptions |
-| `w` / `l` / `S` / `H` / `f` | The same feeds by letter |
+| `S` / `H` / `f` | Extra letter shortcuts for Saved / History / Subscriptions |
 | `Enter` with an empty list | Open the highlighted feed |
 
 ## Search filters
@@ -198,7 +199,7 @@ download_dir = "/home/you/Videos/utui"
 # account_sync = true
 ```
 
-State lives in `~/.local/share/utui/state.json`. Feed cache lives in `~/.cache/utui/feeds` and thumbnail cache in `~/.cache/utui/thumbs`. `state.json` also remembers the last feed so the next launch reopens it (`f`/`w`/`l`/`S`/`H` pages by shortcut; searches and channels by source).
+State lives in `~/.local/share/utui/state.json`. Feed cache lives in `~/.cache/utui/feeds` and thumbnail cache in `~/.cache/utui/thumbs`. `state.json` also remembers the last feed so the next launch reopens it (`1`–`5` bar pages by shortcut; searches and channels by source).
 
 ## Theme (pywal)
 
@@ -216,18 +217,18 @@ No file, no palette → your terminal's own defaults. `WAL_COLORS_FILE` override
 
 ## Account sync (real likes and Watch Later)
 
-With `cookies_browser` set and `account_sync = true`, the `L` and `W` keys act on your actual YouTube account, not just a local list:
+With `cookies_browser` set and `account_sync = true`, the `l` and `w` keys (uppercase `L` / `W` also work) act on your actual YouTube account, not just a local list:
 
-- `L` likes the video; `L` again unlikes it.
-- `W` adds the video to Watch Later; `W` again removes it.
-- `w` opens the Watch Later queue from your account. On that page `W` removes the item.
+- `l` likes the video; `l` again unlikes it.
+- `w` adds the video to Watch Later; `w` again removes it.
+- `1` opens the Watch Later queue from your account. On that page `w` removes the item.
 
 How it works: Utui ships a small embedded helper that reuses `yt-dlp`'s cookie extraction (every browser and keyring yt-dlp supports just works), signs requests to YouTube's web API with the same `SAPISIDHASH` scheme the web client uses, and calls the internal like/Watch Later endpoints. The helper is materialized to `~/.cache/utui/sync.py`, so you can inspect exactly what gets sent, and each action prints one JSON result. The local store mirrors the account state so list markers stay accurate; if the account write fails, the mirror rolls back.
 
 Notes:
 
-- YouTube does not let Utui read your current like state cheaply, so the first `L` on a video you already liked elsewhere will unlike it. Open the Liked page to see the truth.
-- Without `cookies_browser`, or with `account_sync = false`, `L` and `W` toggle local mirrors only (the `S` Saved-list equivalent lives locally) and a toast says so.
+- YouTube does not let Utui read your current like state cheaply, so the first `l` on a video you already liked elsewhere will unlike it. Open the Liked page to see the truth.
+- Without `cookies_browser`, or with `account_sync = false`, `l` and `w` toggle local mirrors only (the `S` Saved-list equivalent lives locally) and a toast says so.
 - Feeds for Watch Later and Liked videos remain read-through yt-dlp. After a successful sync on those pages, Utui refreshes the list automatically.
 
 ## How it compares to yt-x

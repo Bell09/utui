@@ -202,11 +202,13 @@ async fn run_tui(app: &mut App) -> Result<()> {
                         job_id,
                         video,
                         audio,
+                        height,
                     } => {
                         let config = app.config.clone();
                         let tx = tx.clone();
                         tokio::spawn(async move {
-                            let outcome = download_media(&config, &video, audio, &tx, job_id).await;
+                            let outcome =
+                                download_media(&config, &video, audio, height, &tx, job_id).await;
                             let (ok, message) = match outcome {
                                 Ok(message) => (true, message),
                                 Err(error) => (false, error.to_string()),
@@ -319,10 +321,21 @@ fn play_media(config: &Config, video: &yt::Video, audio: bool) -> Result<()> {
     Ok(())
 }
 
+/// The yt-dlp selector for a video download: the quality picker's
+/// `height<=` cap (closest stream at or below it), or the default best
+/// when no height was picked.
+fn video_format(height: Option<u32>) -> String {
+    match height {
+        Some(height) => format!("bv*[height<={height}]+ba/b[height<={height}]"),
+        None => "bestvideo*+bestaudio/best".to_string(),
+    }
+}
+
 async fn download_media(
     config: &Config,
     video: &yt::Video,
     audio: bool,
+    height: Option<u32>,
     tx: &mpsc::UnboundedSender<Msg>,
     job_id: u64,
 ) -> Result<String> {
@@ -360,7 +373,7 @@ async fn download_media(
     } else {
         command
             .arg("--format")
-            .arg("bestvideo*+bestaudio/best")
+            .arg(video_format(height))
             .arg("--merge-output-format")
             .arg("mp4");
     }
@@ -421,5 +434,23 @@ async fn download_media(
                 format!(": {last_error}")
             }
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::video_format;
+
+    #[test]
+    fn quality_cap_builds_selector() {
+        assert_eq!(
+            video_format(Some(720)),
+            "bv*[height<=720]+ba/b[height<=720]"
+        );
+        assert_eq!(
+            video_format(Some(160)),
+            "bv*[height<=160]+ba/b[height<=160]"
+        );
+        assert_eq!(video_format(None), "bestvideo*+bestaudio/best");
     }
 }
