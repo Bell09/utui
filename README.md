@@ -107,7 +107,7 @@ Home and Browse share one key map: navigation and playback follow the usual play
 
 | Key | Action |
 | --- | --- |
-| `/` | Search (accepts queries, colon filters, and plain URLs) |
+| `/` | Focus the search prompt (always visible; accepts queries, colon filters, and plain URLs) |
 | `m` | Action menu for the selected video |
 | `?` | Keybindings help |
 | `q` | Quit |
@@ -137,9 +137,11 @@ Home and Browse share one key map: navigation and playback follow the usual play
 
 ### Home
 
-The interface is compact by design: one header row (feed title, item count, subtitle), one line of feed shortcuts, the list with its preview pane, and a status line — nothing else.
+The interface is compact by design: one header row (feed title, item count, subtitle), the search prompt, one line of feed shortcuts, the list with its preview pane, and a status line — nothing else.
 
-Watch Later, Liked videos, Saved videos, and History sit on the shortcut line right under the header (` w Watch Later  ·  l Liked videos  ·  S Saved videos  ·  H History`); the entry for the feed you have open is highlighted in the accent color. Subscriptions stays reachable via the hidden `f` shortcut (and via last-feed restore).
+The search prompt is always visible in its own row under the header (placeholder: `/ search youtube · paste a url · filters`). Press `/` to focus it — the row shows your query with a cursor and the status line switches to the live hint (`enter opens this url` for pasted links, `filter :…` once you type a colon filter).
+
+Watch Later, Liked videos, Saved videos, and History sit on the shortcut line right under the search prompt (` w Watch Later  ·  l Liked videos  ·  S Saved videos  ·  H History`); the entry for the feed you have open is highlighted in the accent color. Subscriptions stays reachable via the hidden `f` shortcut (and via last-feed restore).
 
 When Utui opens it lands in the last-viewed feed (see *Feeds on launch* below), so content is on screen immediately, with the selected video's thumbnail and details in the preview pane.
 

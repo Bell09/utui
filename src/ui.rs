@@ -1,5 +1,5 @@
 use crate::app::{
-    visible_home_items, Action, App, HomeItem, Overlay, TextInput, ThumbnailState, ToastKind, View,
+    visible_home_items, Action, App, HomeItem, Overlay, ThumbnailState, ToastKind, View,
 };
 use crate::theme::*;
 use crate::util::{format_date, format_duration, format_views, relative_time, truncate};
@@ -20,19 +20,21 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
         frame.render_widget(Block::default().style(Style::new().bg(*BG)), area);
     }
     let layout = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(if app.view == View::Home { 1 } else { 0 }),
-        Constraint::Min(0),
-        Constraint::Length(1),
+        Constraint::Length(1),                                          // header
+        Constraint::Length(1), // search prompt, always visible
+        Constraint::Length(if app.view == View::Home { 1 } else { 0 }), // feed bar
+        Constraint::Min(0),    // list + preview
+        Constraint::Length(1), // status
     ])
     .split(area);
 
     draw_header(frame, layout[0], app, now);
+    draw_search(frame, layout[1], app);
     match app.view {
-        View::Home => draw_home(frame, layout[2], app, now),
-        View::Browse => draw_browse(frame, layout[2], app, now),
+        View::Home => draw_home(frame, layout[3], app, now),
+        View::Browse => draw_browse(frame, layout[3], app, now),
     }
-    draw_status(frame, layout[3], app, now);
+    draw_status(frame, layout[4], app, now);
 
     if let Some(overlay) = &app.overlay {
         draw_overlay(frame, area, app, overlay);
@@ -402,7 +404,26 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
         ("?", "help"),
         ("q", "quit"),
     ];
-    frame.render_widget(Paragraph::new(hint_line(hints)), chunks[0]);
+    // While the search row is focused it owns the hint area with its live
+    // "url vs query vs filter" guidance; otherwise the key map shows.
+    let left = if let Some(Overlay::Search(input)) = &app.overlay {
+        let hint = if crate::app::App::looks_like_url(&input.value) {
+            "enter opens this url  ·  esc cancel".to_string()
+        } else {
+            match yt::parse_search(&input.value).filter {
+                Some(filter) => format!("filter :{filter}  ·  enter search  ·  esc cancel"),
+                None => "paste a url to open  ·  filters  :today  :week  :4k  :hd  :live  :short"
+                    .to_string(),
+            }
+        };
+        Line::from(Span::styled(
+            truncate(&hint, chunks[0].width as usize),
+            Style::default().fg(*MUTED),
+        ))
+    } else {
+        hint_line(hints)
+    };
+    frame.render_widget(Paragraph::new(left), chunks[0]);
 
     let (text, color) = if let Some(toast) = app.active_toast(now) {
         let prefix = match toast.kind {
@@ -444,58 +465,53 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
 
 fn draw_overlay(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
     match overlay {
-        Overlay::Search(input) => draw_prompt(frame, area, input),
+        // The search prompt renders in its own row (see draw_search); its
+        // live hints take over the status line while it is focused.
+        Overlay::Search(_) => {}
         Overlay::Actions { index, actions } => draw_actions(frame, area, app, *index, actions),
         Overlay::Help => draw_help(frame, area),
     }
 }
 
-fn draw_prompt(frame: &mut Frame, area: Rect, input: &TextInput) {
-    if area.height == 0 {
+/// The search prompt is part of the screen, not a popup: it sits in its own
+/// row under the header at all times (ytmtui style). `/` focuses it and the
+/// cursor appears; otherwise a muted placeholder shows what it accepts.
+fn draw_search(frame: &mut Frame, area: Rect, app: &App) {
+    if area.height == 0 || area.width == 0 {
         return;
     }
-    let height = 2.min(area.height);
-    let rect = Rect::new(area.x, area.y, area.width, height);
-    frame.render_widget(Clear, rect);
-
+    let input = match &app.overlay {
+        Some(Overlay::Search(input)) => Some(input),
+        _ => None,
+    };
     let prefix = "/ ";
-    let spans = vec![
-        Span::styled(
-            prefix.to_string(),
-            Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(input.value.clone(), Style::default().fg(*TEXT)),
-    ];
-    frame.render_widget(
-        Paragraph::new(Line::from(spans)),
-        Rect::new(rect.x, rect.y, rect.width, 1),
-    );
-
-    if rect.height > 1 {
-        let hint = if crate::app::App::looks_like_url(&input.value) {
-            "enter opens this url  ·  esc cancel".to_string()
-        } else {
-            match yt::parse_search(&input.value).filter {
-                Some(filter) => format!("filter :{filter}  ·  enter search  ·  esc cancel"),
-                None => "paste a url to open  ·  filters  :today  :week  :4k  :hd  :live  :short"
-                    .to_string(),
-            }
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                truncate(&hint, rect.width.saturating_sub(2) as usize),
+    let mut spans = vec![Span::styled(
+        prefix,
+        Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
+    )];
+    let row = Rect::new(area.x, area.y, area.width, 1);
+    match input {
+        Some(input) => {
+            spans.push(Span::styled(
+                input.value.clone(),
+                Style::default().fg(*TEXT),
+            ));
+            frame.render_widget(Paragraph::new(Line::from(spans)), row);
+            let cursor_x = area
+                .x
+                .saturating_add(prefix.chars().count() as u16)
+                .saturating_add(input.cursor_width() as u16)
+                .min(row.right().saturating_sub(1));
+            frame.set_cursor_position((cursor_x, row.y));
+        }
+        None => {
+            spans.push(Span::styled(
+                "search youtube · paste a url · filters".to_string(),
                 Style::default().fg(*MUTED),
-            ))),
-            Rect::new(rect.x, rect.y + 1, rect.width, 1),
-        );
+            ));
+            frame.render_widget(Paragraph::new(Line::from(spans)), row);
+        }
     }
-
-    let cursor_x = rect
-        .x
-        .saturating_add(prefix.chars().count() as u16)
-        .saturating_add(input.cursor_width() as u16)
-        .min(rect.right().saturating_sub(1));
-    frame.set_cursor_position((cursor_x, rect.y));
 }
 
 fn draw_actions(frame: &mut Frame, area: Rect, app: &App, index: usize, actions: &[Action]) {
