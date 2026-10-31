@@ -139,7 +139,7 @@ Home and Browse share one key map: navigation and playback follow the usual play
 
 The interface is compact by design: the search prompt up top, one line of feed shortcuts, the list with its preview pane, and a status line — nothing else.
 
-The search prompt is always visible in its own top row (placeholder: `/ search youtube · paste a url · filters`). Press `/` to focus it — the row shows your query with a cursor and the status line switches to the live hint (`enter opens this url` for pasted links, `filter :…` once you type a colon filter).
+The search prompt is always visible in its own top row (placeholder: `/ search youtube · filters`). Press `/` to focus it — the row shows your query with a cursor and the status line switches to the live hint (`enter opens this url` once a URL is detected, `filter :…` once you type a colon filter).
 
 Watch Later, Liked videos, Saved videos, and History sit on the shortcut line right under the search prompt (` w Watch Later  ·  l Liked videos  ·  S Saved videos  ·  H History`); the entry for the feed you have open is highlighted in the accent color. Subscriptions stays reachable via the hidden `f` shortcut (and via last-feed restore).
 

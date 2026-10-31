@@ -361,8 +361,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
         } else {
             match yt::parse_search(&input.value).filter {
                 Some(filter) => format!("filter :{filter}  ·  enter search  ·  esc cancel"),
-                None => "paste a url to open  ·  filters  :today  :week  :4k  :hd  :live  :short"
-                    .to_string(),
+                None => "filters  :today  :week  :4k  :hd  :live  :short".to_string(),
             }
         };
         Line::from(Span::styled(
@@ -466,7 +465,7 @@ fn draw_search(frame: &mut Frame, area: Rect, app: &App) {
         }
         None => {
             spans.push(Span::styled(
-                "search youtube · paste a url · filters".to_string(),
+                "search youtube · filters".to_string(),
                 Style::default().fg(*MUTED),
             ));
             frame.render_widget(Paragraph::new(Line::from(spans)), row);
