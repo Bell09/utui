@@ -607,13 +607,6 @@ impl App {
         !self.stack.is_empty()
     }
 
-    pub fn current_title(&self) -> String {
-        match self.view {
-            View::Home => "Home".to_string(),
-            View::Browse => self.feed.title.clone(),
-        }
-    }
-
     pub fn start_search(&mut self, query: &str) -> Result<()> {
         let resolved = self.store.recall_search(query);
         let plan = yt::parse_search(&resolved);

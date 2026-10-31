@@ -20,78 +20,23 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
         frame.render_widget(Block::default().style(Style::new().bg(*BG)), area);
     }
     let layout = Layout::vertical([
-        Constraint::Length(1),                                          // header
-        Constraint::Length(1), // search prompt, always visible
+        Constraint::Length(1),                                          // search prompt
         Constraint::Length(if app.view == View::Home { 1 } else { 0 }), // feed bar
-        Constraint::Min(0),    // list + preview
-        Constraint::Length(1), // status
+        Constraint::Min(0),                                             // list + preview
+        Constraint::Length(1),                                          // status
     ])
     .split(area);
 
-    draw_header(frame, layout[0], app, now);
-    draw_search(frame, layout[1], app);
+    draw_search(frame, layout[0], app);
     match app.view {
-        View::Home => draw_home(frame, layout[3], app, now),
-        View::Browse => draw_browse(frame, layout[3], app, now),
+        View::Home => draw_home(frame, layout[2], app, now),
+        View::Browse => draw_browse(frame, layout[2], app, now),
     }
-    draw_status(frame, layout[4], app, now);
+    draw_status(frame, layout[3], app, now);
 
     if let Some(overlay) = &app.overlay {
         draw_overlay(frame, area, app, overlay);
     }
-}
-
-fn draw_header(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
-    let chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Length(34)]).split(area);
-
-    // The header doubles as the feed title row: show the feed's title when one
-    // is loaded, otherwise the view name ("Home").
-    let title = if app.feed.title.is_empty() {
-        app.current_title()
-    } else {
-        app.feed.title.clone()
-    };
-    let mut spans = vec![Span::styled(
-        truncate(&title, chunks[0].width.saturating_sub(10) as usize),
-        Style::default().fg(*TEXT).add_modifier(Modifier::BOLD),
-    )];
-    if app.can_go_back() {
-        spans.push(Span::styled("  b back", Style::default().fg(*MUTED)));
-    }
-    frame.render_widget(Paragraph::new(Line::from(spans)), chunks[0]);
-
-    let right = if app.loading {
-        Line::from(vec![
-            Span::styled(app.spinner_frame(now), Style::default().fg(*ACCENT)),
-            Span::styled(
-                format!(" {}", truncate(&app.loading_label, 30)),
-                Style::default().fg(*MUTED),
-            ),
-        ])
-    } else {
-        let subtitle = app.feed.subtitle.trim();
-        let count = app.feed.items.len();
-        let text = if subtitle.is_empty() {
-            if count == 0 {
-                String::new()
-            } else {
-                format!("{count} items")
-            }
-        } else if count == 0 || subtitle.chars().any(|c| c.is_ascii_digit()) {
-            subtitle.to_string()
-        } else {
-            format!("{count} items · {subtitle}")
-        };
-        if text.is_empty() {
-            Line::from("")
-        } else {
-            Line::from(Span::styled(
-                truncate(&text, 32),
-                Style::default().fg(*MUTED),
-            ))
-        }
-    };
-    frame.render_widget(Paragraph::new(right).alignment(Alignment::Right), chunks[1]);
 }
 
 fn draw_home(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
@@ -101,8 +46,8 @@ fn draw_home(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
     draw_feed_content(frame, sections[1], app, now);
 }
 
-/// One compact line of feed shortcuts directly under the header; the selected
-/// entry is highlighted in the accent color.
+/// One compact line of feed shortcuts; the selected entry is highlighted in
+/// the accent color.
 fn draw_home_menu(frame: &mut Frame, area: Rect, app: &mut App) {
     if area.height == 0 || area.width < 20 {
         return;
@@ -136,8 +81,8 @@ fn draw_browse(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
 }
 
 fn draw_feed_content(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
-    // The feed title, item count, and subtitle live in the shared header row
-    // (see draw_header); this area is list plus preview only.
+    // List plus preview only; chrome lives in the search, feed-bar, and
+    // status rows.
     let selected = app.selected_video().cloned();
 
     if area.width >= 88 {
@@ -393,17 +338,21 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
 
     // One hint line for both views — they share a key map now. Kept under
     // ~80 columns so the line survives next to the 48-column toast area.
-    let hints: &[(&str, &str)] = &[
+    // The feed bar on Home shows its letters by itself, so the 1-5 hint
+    // only appears while there is no stacked feed to go back to.
+    let mut hints: Vec<(&str, &str)> = vec![
         ("j/k", "move"),
         ("enter", "play"),
         ("m", "menu"),
         ("a", "save"),
         ("L", "like"),
-        ("1-5", "feeds"),
-        ("/", "search"),
-        ("?", "help"),
-        ("q", "quit"),
     ];
+    if app.can_go_back() {
+        hints.push(("b", "back"));
+    } else {
+        hints.push(("1-5", "feeds"));
+    }
+    hints.extend_from_slice(&[("/", "search"), ("?", "help"), ("q", "quit")]);
     // While the search row is focused it owns the hint area with its live
     // "url vs query vs filter" guidance; otherwise the key map shows.
     let left = if let Some(Overlay::Search(input)) = &app.overlay {
@@ -421,7 +370,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
             Style::default().fg(*MUTED),
         ))
     } else {
-        hint_line(hints)
+        hint_line(&hints)
     };
     frame.render_widget(Paragraph::new(left), chunks[0]);
 
@@ -441,6 +390,17 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
         (
             format!("↓ {}%  {}", download.percent, truncate(&download.title, 34)),
             *WARN,
+        )
+    } else if app.loading {
+        // The removed header used to carry the fetch spinner; keep it visible
+        // on the right while a feed is loading and no toast is up.
+        (
+            format!(
+                "{} {}",
+                app.spinner_frame(now),
+                truncate(&app.loading_label, 30)
+            ),
+            *MUTED,
         )
     } else {
         (
@@ -474,8 +434,8 @@ fn draw_overlay(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
 }
 
 /// The search prompt is part of the screen, not a popup: it sits in its own
-/// row under the header at all times (ytmtui style). `/` focuses it and the
-/// cursor appears; otherwise a muted placeholder shows what it accepts.
+/// top row (ytmtui style). `/` focuses it and the cursor appears; otherwise a
+/// muted placeholder shows what it accepts.
 fn draw_search(frame: &mut Frame, area: Rect, app: &App) {
     if area.height == 0 || area.width == 0 {
         return;
