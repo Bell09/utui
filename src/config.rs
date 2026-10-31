@@ -138,7 +138,7 @@ impl Config {
         let body = toml::to_string_pretty(self).context("could not serialize config")?;
         let text = format!(
             "# Utui configuration\n\
-             # See README.md for details. Restart or press `r` in Settings to reload.\n\n{body}"
+             # See README.md for details. Restart for changes to apply.\n\n{body}"
         );
         fs::write(paths.config_file(), text)
             .with_context(|| format!("could not write {}", paths.config_file().display()))

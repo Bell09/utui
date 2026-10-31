@@ -18,7 +18,6 @@ const TOAST_LIFETIME: Duration = Duration::from_secs(5);
 pub enum View {
     Home,
     Browse,
-    Settings,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -284,8 +283,6 @@ pub enum Effect {
     },
     Copy(String),
     OpenUrl(String),
-    EditConfig,
-    OpenDownloads,
     Sync {
         video: Video,
         action: SyncAction,
@@ -356,7 +353,6 @@ pub struct DownloadView {
     pub job_id: u64,
     pub title: String,
     pub percent: u8,
-    pub audio: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -368,7 +364,6 @@ pub enum HomeAction {
     },
     Saved,
     History,
-    Settings,
 }
 
 pub struct HomeItem {
@@ -415,12 +410,6 @@ pub const HOME_ITEMS: &[HomeItem] = &[
         key: "H",
         title: "History",
         action: HomeAction::History,
-        hidden: false,
-    },
-    HomeItem {
-        key: ",",
-        title: "Settings",
-        action: HomeAction::Settings,
         hidden: false,
     },
     // Cookie-path subscriptions stay a shortcut (`f`) and are restorable,
@@ -519,6 +508,7 @@ impl App {
                 last.auth,
                 false,
                 false,
+                View::Home,
             );
         }
     }
@@ -624,7 +614,6 @@ impl App {
         match self.view {
             View::Home => "Home".to_string(),
             View::Browse => self.feed.title.clone(),
-            View::Settings => "Settings".to_string(),
         }
     }
 
@@ -647,7 +636,16 @@ impl App {
         let url = yt::build_search_url(&plan.term, &plan.sp);
         let _ = self.persist();
         self.home_origin = None;
-        self.request_feed(url, title, subtitle, FeedKind::Search, false, false, false);
+        self.request_feed(
+            url,
+            title,
+            subtitle,
+            FeedKind::Search,
+            false,
+            false,
+            false,
+            self.view,
+        );
         Ok(())
     }
 
@@ -685,6 +683,7 @@ impl App {
             false,
             push,
             false,
+            self.view,
         );
         Ok(())
     }
@@ -721,6 +720,7 @@ impl App {
                     auth,
                     false,
                     false,
+                    View::Home,
                 );
             }
             HomeAction::Saved => {
@@ -731,7 +731,6 @@ impl App {
                 self.home_origin = Some(item.key);
                 self.show_history(false);
             }
-            HomeAction::Settings => self.view = View::Settings,
         }
     }
 
@@ -827,6 +826,7 @@ impl App {
         requires_auth: bool,
         push: bool,
         bypass_cache: bool,
+        view: View,
     ) {
         if requires_auth && self.config.cookies_browser.is_none() {
             self.feed = Feed {
@@ -837,13 +837,13 @@ impl App {
                 items: Vec::new(),
                 notice: Some(
                     "This feed needs YouTube cookies. Set `cookies_browser = \"firefox\"` \
-                     (or another browser) in Settings, then press `r`."
+                     (or another browser) in config.toml, then press `r`."
                         .to_string(),
                 ),
                 auth: true,
                 fetched_at: 0,
             };
-            self.view = View::Browse;
+            self.view = view;
             self.overlay = None;
             self.loading = false;
             self.fetch_id = self.fetch_id.wrapping_add(1);
@@ -876,7 +876,7 @@ impl App {
             auth: requires_auth,
             fetched_at: 0,
         };
-        self.view = View::Browse;
+        self.view = view;
         self.overlay = None;
         self.reset_selection();
 
@@ -922,27 +922,35 @@ impl App {
         match self.view {
             View::Home => self.handle_home_key(key),
             View::Browse => self.handle_browse_key(key),
-            View::Settings => self.handle_settings_key(key),
         }
     }
 
     fn handle_home_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h') => {
-                self.home_index = self.home_index.saturating_sub(1);
+            KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('h') => {
+                self.move_selection(-1);
             }
-            KeyCode::Right | KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
-                let count = visible_home_items().count();
-                self.home_index = (self.home_index + 1).min(count.saturating_sub(1));
+            KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
+                self.move_selection(1);
             }
-            KeyCode::Enter => self.open_visible_home_item(self.home_index),
+            KeyCode::PageUp => self.move_selection(-10),
+            KeyCode::PageDown => self.move_selection(10),
+            KeyCode::Home | KeyCode::Char('g') => self.select_first(),
+            KeyCode::End | KeyCode::Char('G') => self.select_last(),
+            KeyCode::Enter => {
+                if !self.feed.items.is_empty() {
+                    self.open_actions();
+                } else {
+                    self.open_visible_home_item(self.home_index);
+                }
+            }
+            KeyCode::Esc if self.loading => self.cancel_pending_fetch(),
             KeyCode::Char('f') => self.open_home_item_by_key("f"),
             KeyCode::Char('w') => self.open_home_item_by_key("w"),
             KeyCode::Char('l') => self.open_home_item_by_key("l"),
             KeyCode::Char('S') => self.open_home_item_by_key("S"),
             KeyCode::Char('H') => self.open_home_item_by_key("H"),
-            KeyCode::Char(',') => self.view = View::Settings,
-            KeyCode::Esc if self.loading => self.cancel_pending_fetch(),
+            KeyCode::Char('q') => self.quit = true,
             _ => {}
         }
     }
@@ -970,16 +978,6 @@ impl App {
             KeyCode::Char('r') => self.refresh(),
             KeyCode::Char('b') | KeyCode::Esc => self.back(),
             KeyCode::Tab => self.open_actions(),
-            _ => {}
-        }
-    }
-
-    fn handle_settings_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Char('e') => self.pending_effect = Some(Effect::EditConfig),
-            KeyCode::Char('o') => self.pending_effect = Some(Effect::OpenDownloads),
-            KeyCode::Char('r') => self.reload_config(),
-            KeyCode::Esc => self.view = View::Home,
             _ => {}
         }
     }
@@ -1098,7 +1096,7 @@ impl App {
             return;
         };
         self.record_watch(&video);
-        let job_id = self.begin_download(&video, audio);
+        let job_id = self.begin_download(&video);
         self.pending_effect = Some(Effect::Download {
             job_id,
             video,
@@ -1234,6 +1232,7 @@ impl App {
             true,
             true,
             false,
+            self.view,
         );
     }
 
@@ -1258,6 +1257,7 @@ impl App {
             false,
             true,
             false,
+            self.view,
         );
     }
 
@@ -1339,7 +1339,7 @@ impl App {
                 let subtitle = self.feed.subtitle.clone();
                 let kind = self.feed.kind;
                 let auth = self.feed.auth;
-                self.request_feed(url, title, subtitle, kind, auth, false, true);
+                self.request_feed(url, title, subtitle, kind, auth, false, true, self.view);
             }
         }
     }
@@ -1510,14 +1510,13 @@ impl App {
         }
     }
 
-    pub fn begin_download(&mut self, video: &Video, audio: bool) -> u64 {
+    pub fn begin_download(&mut self, video: &Video) -> u64 {
         self.download_id = self.download_id.wrapping_add(1);
         let job_id = self.download_id;
         self.download = Some(DownloadView {
             job_id,
             title: video.title.clone(),
             percent: 0,
-            audio,
         });
         job_id
     }
@@ -1549,16 +1548,6 @@ impl App {
             kind,
             created: Instant::now(),
         });
-    }
-
-    pub fn reload_config(&mut self) {
-        match Config::load(&self.paths) {
-            Ok(config) => {
-                self.config = config;
-                self.toast_success("Configuration reloaded");
-            }
-            Err(error) => self.toast_error(format!("Config reload failed: {error}")),
-        }
     }
 
     pub fn open_search_overlay(&mut self) {

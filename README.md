@@ -95,7 +95,7 @@ Subscriptions, Watch Later, and Liked videos need YouTube cookies.
    Supported values are whatever `yt-dlp --cookies-from-browser` accepts, for example `firefox`, `chrome`, `chromium`, `brave`, `edge`, `opera`, `safari`, or `vivaldi`.
 
 2. Make sure that browser is signed in to YouTube.
-3. Press `r` in Settings, or restart Utui.
+3. Restart Utui (or restart your terminal session so the palette reloads).
 
 Cookies are used only by `yt-dlp` and its cookie machinery (also by the account-sync helper, which is a standalone `yt-dlp`-based process). Utui never reads or stores browser cookies itself.
 
@@ -112,14 +112,16 @@ Cookies are used only by `yt-dlp` and its cookie machinery (also by the account-
 
 ### Home
 
-Watch Later, Liked videos, Saved videos, History, and Settings sit in a single horizontal bar of bordered cells right under the search input.
+Watch Later, Liked videos, Saved videos, and History sit in a single horizontal bar of bordered cells right under the header. Subscriptions stays reachable via the hidden `f` shortcut (and via last-feed restore).
+
+When Utui opens it lands in the last-viewed feed (see *Feeds on launch* below); the bar sits above the list.
 
 | Key | Action |
 | --- | --- |
-| `←` / `→` (or `h` / `j` / `k` / `Tab`) | Move between cells |
-| `Enter` | Open the selected cell |
-| `w` `l` `S` `H` `,` | Jump straight to Watch Later / Liked / Saved / History / Settings |
-| `f` | Subscriptions (cookie-backed; kept as a hidden shortcut) |
+| `j` / `k` / `h` / `g` / `G` / `←` / `→` / `Tab` | Move through the list or between cells |
+| `Enter` | Open the selected cell when the list is empty, action menu when a feed is shown |
+| `w` / `l` / `S` / `H` | Jump straight to Watch Later / Liked / Saved / History |
+| `f` | Subscriptions (cookie-backed; hidden shortcut) |
 
 ### Browse
 
@@ -141,15 +143,6 @@ Watch Later, Liked videos, Saved videos, History, and Settings sit in a single h
 | `o` | Open in browser |
 | `r` | Refresh the current feed (bypasses cache) |
 | `b` / `Esc` | Back |
-
-### Settings
-
-| Key | Action |
-| --- | --- |
-| `e` | Edit `config.toml` |
-| `o` | Open the download folder |
-| `r` | Reload config from disk |
-| `Esc` | Back home |
 
 ## Search filters
 

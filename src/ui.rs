@@ -2,9 +2,7 @@ use crate::app::{
     visible_home_items, Action, App, HomeItem, Overlay, TextInput, ThumbnailState, ToastKind, View,
 };
 use crate::theme::*;
-use crate::util::{
-    display_width, format_date, format_duration, format_views, relative_time, truncate,
-};
+use crate::util::{format_date, format_duration, format_views, relative_time, truncate};
 use crate::yt::{self, Video};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -24,6 +22,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
     }
     let layout = Layout::vertical([
         Constraint::Length(1),
+        Constraint::Length(if app.view == View::Home { 3 } else { 0 }),
         Constraint::Min(0),
         Constraint::Length(1),
     ])
@@ -31,11 +30,10 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
 
     draw_header(frame, layout[0], app, now);
     match app.view {
-        View::Home => draw_home(frame, layout[1], app),
-        View::Browse => draw_browse(frame, layout[1], app, now),
-        View::Settings => draw_settings(frame, layout[1], app),
+        View::Home => draw_home(frame, layout[2], app, now),
+        View::Browse => draw_browse(frame, layout[2], app, now),
     }
-    draw_status(frame, layout[2], app, now);
+    draw_status(frame, layout[3], app, now);
 
     if let Some(overlay) = &app.overlay {
         draw_overlay(frame, area, app, overlay);
@@ -76,29 +74,11 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     frame.render_widget(Paragraph::new(right).alignment(Alignment::Right), chunks[1]);
 }
 
-fn draw_home(frame: &mut Frame, area: Rect, app: &mut App) {
-    let show_intro = area.height >= 10;
-    let intro_height = if show_intro { 2 } else { 0 };
+fn draw_home(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
+    let sections = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
 
-    let sections = Layout::vertical([
-        Constraint::Length(intro_height),
-        Constraint::Length(3),
-        Constraint::Min(0),
-    ])
-    .split(area);
-
-    if show_intro {
-        let lines = vec![
-            Line::from(Span::styled(
-                "YouTube at terminal velocity",
-                Style::default().fg(*MUTED),
-            )),
-            Line::from(""),
-        ];
-        frame.render_widget(Paragraph::new(Text::from(lines)), sections[0]);
-    }
-
-    draw_home_menu(frame, sections[1], app);
+    draw_home_menu(frame, sections[0], app);
+    draw_feed_content(frame, sections[1], app, now);
 }
 
 /// One horizontal row of bordered cells, directly under the search prompt.
@@ -144,6 +124,10 @@ fn draw_home_menu(frame: &mut Frame, area: Rect, app: &mut App) {
 }
 
 fn draw_browse(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
+    draw_feed_content(frame, area, app, now);
+}
+
+fn draw_feed_content(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
     let sections = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
 
     let title = truncate(
@@ -428,67 +412,26 @@ fn thumbnail_rows(app: &App, inner: Rect) -> u16 {
     rows.clamp(4, max_rows)
 }
 
-fn draw_settings(frame: &mut Frame, area: Rect, app: &App) {
-    let inner = Block::default()
-        .padding(Padding::new(2, 2, 1, 0))
-        .inner(area);
-
-    let lines = vec![
-        section("config"),
-        kv("config", &app.paths.config_file().display().to_string()),
-        kv("state", &app.paths.state_file().display().to_string()),
-        kv("cache", &app.paths.feed_cache_dir().display().to_string()),
-        Line::from(""),
-        section("player"),
-        kv("player", &app.config.player),
-        kv(
-            "cookies",
-            app.config.cookies_browser.as_deref().unwrap_or("off"),
-        ),
-        kv("results", &app.config.results.to_string()),
-        kv("downloads", &app.config.download_dir.display().to_string()),
-        Line::from(""),
-        kv("video args", &app.config.video_args.join(" ")),
-        kv("audio args", &app.config.audio_args.join(" ")),
-        Line::from(""),
-        section("about"),
-        Line::from(Span::styled(
-            format!("utui v{}", env!("CARGO_PKG_VERSION")),
-            Style::default().fg(*TEXT),
-        )),
-        Line::from(Span::styled(
-            "native Rust · yt-dlp · mpv",
-            Style::default().fg(*MUTED),
-        )),
-        Line::from(""),
-        Line::from(vec![
-            key("e"),
-            Span::styled(" edit config  ", Style::default().fg(*MUTED)),
-            key("o"),
-            Span::styled(" downloads  ", Style::default().fg(*MUTED)),
-            key("r"),
-            Span::styled(" reload", Style::default().fg(*MUTED)),
-        ]),
-    ];
-
-    frame.render_widget(
-        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }),
-        inner,
-    );
-}
-
 fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     let chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Length(48)]).split(area);
 
     let hints: &[(&str, &str)] = match app.view {
         View::Home => &[
-            ("←→", "select"),
-            ("enter", "open"),
+            ("j/k", "move"),
+            ("g/G", "first/last"),
+            ("enter", "actions"),
+            ("p", "play"),
+            ("a", "audio"),
+            ("d", "download"),
+            ("s", "save"),
             ("/", "search"),
+            ("b", "back"),
             ("?", "help"),
             ("q", "quit"),
         ],
         View::Browse => &[
+            ("j/k", "move"),
+            ("g/G", "first/last"),
             ("enter", "actions"),
             ("p", "play"),
             ("a", "audio"),
@@ -499,13 +442,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
             ("/", "search"),
             ("b", "back"),
             ("?", "help"),
-        ],
-        View::Settings => &[
-            ("e", "edit"),
-            ("o", "downloads"),
-            ("r", "reload"),
-            ("esc", "home"),
-            ("?", "help"),
+            ("q", "quit"),
         ],
     };
     frame.render_widget(Paragraph::new(hint_line(hints)), chunks[0]);
@@ -565,30 +502,13 @@ fn draw_prompt(frame: &mut Frame, area: Rect, input: &TextInput) {
     frame.render_widget(Clear, rect);
 
     let prefix = "/ ";
-    let prefix_width = prefix.chars().count() as u16;
-    let mut spans = vec![
+    let spans = vec![
         Span::styled(
             prefix.to_string(),
             Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            input.value.clone(),
-            Style::default()
-                .fg(*TEXT)
-                .add_modifier(Modifier::UNDERLINED),
-        ),
+        Span::styled(input.value.clone(), Style::default().fg(*TEXT)),
     ];
-    // Extend the underline across the row so the input reads as a field.
-    let filler = rect
-        .width
-        .saturating_sub(prefix_width)
-        .saturating_sub(display_width(&input.value) as u16);
-    if filler > 0 {
-        spans.push(Span::styled(
-            " ".repeat(filler as usize),
-            Style::default().add_modifier(Modifier::UNDERLINED),
-        ));
-    }
     frame.render_widget(
         Paragraph::new(Line::from(spans)),
         Rect::new(rect.x, rect.y, rect.width, 1),
@@ -615,7 +535,7 @@ fn draw_prompt(frame: &mut Frame, area: Rect, input: &TextInput) {
 
     let cursor_x = rect
         .x
-        .saturating_add(prefix_width)
+        .saturating_add(prefix.chars().count() as u16)
         .saturating_add(input.cursor_width() as u16)
         .min(rect.right().saturating_sub(1));
     frame.set_cursor_position((cursor_x, rect.y));
@@ -744,13 +664,6 @@ fn draw_help(frame: &mut Frame, area: Rect) {
     );
 }
 
-fn key(value: &'static str) -> Span<'static> {
-    Span::styled(
-        value,
-        Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
-    )
-}
-
 fn hint_line(hints: &[(&str, &str)]) -> Line<'static> {
     let mut spans = Vec::new();
     for (index, (key_value, label)) in hints.iter().enumerate() {
@@ -774,13 +687,6 @@ fn section(label: &'static str) -> Line<'static> {
         label,
         Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
     ))
-}
-
-fn kv(label: &str, value: &str) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(format!("{label:<12}"), Style::default().fg(*MUTED)),
-        Span::styled(value.to_string(), Style::default().fg(*TEXT)),
-    ])
 }
 
 fn filter_names(start: usize, end: usize) -> String {

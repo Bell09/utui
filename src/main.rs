@@ -15,7 +15,6 @@ use config::Config;
 use crossterm::event::{self, Event};
 use serde::Serialize;
 use std::io::IsTerminal;
-use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
 use std::time::{Duration, Instant};
 use store::Store;
@@ -252,36 +251,6 @@ async fn run_tui(app: &mut App) -> Result<()> {
                             }));
                         }
                     }
-                    Effect::EditConfig => {
-                        suspend_tui();
-                        let outcome = edit_config(&app.paths.config_file());
-                        terminal = ratatui::init();
-                        terminal.clear()?;
-                        app.clear_thumbnail();
-                        match outcome {
-                            Ok(()) => {
-                                app.reload_config();
-                            }
-                            Err(error) => app.toast_error(error.to_string()),
-                        }
-                    }
-                    Effect::OpenDownloads => {
-                        let dir = if let Some(download) = &app.download {
-                            if download.audio {
-                                app.config.download_audio_dir()
-                            } else {
-                                app.config.download_video_dir()
-                            }
-                        } else {
-                            app.config.download_dir.clone()
-                        };
-                        match config::ensure_dir(&dir)
-                            .and_then(|()| util::open_external(&dir.display().to_string()))
-                        {
-                            Ok(()) => app.toast_info(format!("Opened {}", dir.display())),
-                            Err(error) => app.toast_error(error.to_string()),
-                        }
-                    }
                 }
             }
 
@@ -453,22 +422,4 @@ async fn download_media(
             }
         )
     }
-}
-
-fn edit_config(path: &Path) -> Result<()> {
-    let editor = std::env::var("VISUAL")
-        .or_else(|_| std::env::var("EDITOR"))
-        .unwrap_or_else(|_| "nano".to_string());
-    let mut parts = editor.split_whitespace();
-    let program = parts.next().unwrap_or("nano");
-    let args: Vec<&str> = parts.collect();
-    let status = StdCommand::new(program)
-        .args(args)
-        .arg(path)
-        .status()
-        .with_context(|| format!("could not launch editor {program}"))?;
-    if !status.success() {
-        bail!("editor exited with {status}");
-    }
-    Ok(())
 }
