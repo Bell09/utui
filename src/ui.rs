@@ -20,9 +20,8 @@ const TOP_RULE: &str = "',─────,'───────',────�
 
 pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
     let area = frame.area();
-    if bg_active() {
-        frame.render_widget(Block::default().style(Style::new().bg(*BG)), area);
-    }
+    // No background paint: the terminal's own surface (transparency,
+    // blur, wallpaper) shows through everywhere.
     let layout = Layout::vertical([
         Constraint::Length(1),                                          // search prompt
         Constraint::Length(1),                                          // decorative rule

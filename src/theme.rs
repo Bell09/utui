@@ -23,9 +23,6 @@ struct Theme {
     success: Color,
     warn: Color,
     error: Color,
-    bg: Color,
-    /// True when the pywal palette was loaded.
-    active: bool,
 }
 
 impl Default for Theme {
@@ -38,8 +35,6 @@ impl Default for Theme {
             success: DEFAULT_SUCCESS,
             warn: DEFAULT_WARN,
             error: DEFAULT_ERROR,
-            bg: Color::Reset,
-            active: false,
         }
     }
 }
@@ -53,12 +48,6 @@ pub static ACCENT2: LazyLock<Color> = LazyLock::new(|| THEME.accent2);
 pub static SUCCESS: LazyLock<Color> = LazyLock::new(|| THEME.success);
 pub static WARN: LazyLock<Color> = LazyLock::new(|| THEME.warn);
 pub static ERROR: LazyLock<Color> = LazyLock::new(|| THEME.error);
-pub static BG: LazyLock<Color> = LazyLock::new(|| THEME.bg);
-
-/// Whether the terminal background should be painted (pywal mode only).
-pub fn bg_active() -> bool {
-    THEME.active
-}
 
 impl Theme {
     fn build() -> Self {
@@ -68,15 +57,17 @@ impl Theme {
         }
     }
 
-    /// Maps a parsed pywal palette onto the interface colors.
+    /// Maps a parsed pywal palette onto the interface colors. There is no
+    /// background mapping on purpose — the frame never paints a background,
+    /// so the terminal's own surface (transparency, blur) shows through.
     fn from_json(json: &Value) -> Self {
         let Some(colors) = json.get("colors") else {
             return Self::default();
         };
         let hex = |name: &str| decode_hex(colors.get(name)?.as_str()?);
-        let Some((r, g, b)) = hex("color0") else {
+        if hex("color0").is_none() {
             return Self::default();
-        };
+        }
         let rgb = |t: Option<(u8, u8, u8)>, fallback: Color| match t {
             Some((r, g, b)) => Color::Rgb(r, g, b),
             None => fallback,
@@ -92,8 +83,6 @@ impl Theme {
             success: rgb(hex("color2"), DEFAULT_SUCCESS),
             warn: rgb(hex("color3"), DEFAULT_WARN),
             error: rgb(hex("color1"), DEFAULT_ERROR),
-            bg: Color::Rgb(r, g, b),
-            active: true,
         }
     }
 }
@@ -133,8 +122,8 @@ mod tests {
             "special": {"background": "#1b1d1e", "foreground": "#f8f8f8"},
             "colors": {
                 "color1": "#d64d4d", "color2": "#52a452", "color3": "#c8a03c",
-                "color4": "#4b8bc9", "color7": "#a9a9a9", "color8": "#555555",
-                "color0": "#202124"
+                "color4": "#4b8bc9", "color6": "#d0ccb4", "color7": "#a9a9a9",
+                "color8": "#555555", "color0": "#202124"
             }
         })
     }
@@ -142,9 +131,8 @@ mod tests {
     #[test]
     fn pywal_palette_maps_to_theme() {
         let theme = Theme::from_json(&sample());
-        assert!(theme.active);
-        assert_eq!(theme.bg, Color::Rgb(0x20, 0x21, 0x24));
         assert_eq!(theme.accent, Color::Rgb(0x4b, 0x8b, 0xc9));
+        assert_eq!(theme.accent2, Color::Rgb(0xd0, 0xcc, 0xb4));
         assert_eq!(theme.error, Color::Rgb(0xd6, 0x4d, 0x4d));
         assert_eq!(theme.warn, Color::Rgb(0xc8, 0xa0, 0x3c));
         assert_eq!(theme.success, Color::Rgb(0x52, 0xa4, 0x52));
@@ -155,9 +143,8 @@ mod tests {
     #[test]
     fn missing_palette_falls_back_to_terminal_defaults() {
         let theme = Theme::from_json(&Value::default());
-        assert!(!theme.active);
         assert_eq!(theme.accent, DEFAULT_ACCENT);
-        assert_eq!(theme.bg, Color::Reset);
+        assert_eq!(theme.accent2, DEFAULT_ACCENT);
         assert_eq!(theme.text, DEFAULT_TEXT);
     }
 }

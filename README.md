@@ -17,7 +17,7 @@ It reimplements the `yt-x` workflow as a single native binary: no shell script, 
 - **Library** — locally saved videos and watch history, stored as JSON.
 - **Cookie-backed feeds** — Subscriptions, Watch Later, and Liked videos via `yt-dlp --cookies-from-browser`.
 - **Feeds on launch** — Utui reopens the feed you were viewing when you last quit, so content is on screen immediately.
-- **pywal colors** — when `~/.cache/wal/colors.json` exists (written by [pywal](https://github.com/dylanaraps/pywal)), the wallpaper's 16-color palette drives the interface: the background is painted, text uses the palette foreground, and accent/success/warning/error/dim all map to palette colors. Without pywal, Utui uses your terminal's own colors with a cyan accent.
+- **pywal colors** — when `~/.cache/wal/colors.json` exists (written by [pywal](https://github.com/dylanaraps/pywal)), the wallpaper's 16-color palette drives the interface: text uses the palette foreground, and accent/success/warning/error/dim all map to palette colors — while the background stays your terminal's own (transparency included). Without pywal, Utui uses your terminal's own colors with a cyan accent.
 - **Scriptable** — `--json` gives clean machine-readable output for scripts and pipelines.
 - **Small and fast** — release builds use LTO and a single codegen unit. The only HTTP traffic is thumbnail downloads from YouTube's image CDN.
 
@@ -207,11 +207,13 @@ Utui reads `~/.cache/wal/colors.json` at startup:
 
 | Interface role | pywal color |
 | --- | --- |
-| Background | `color0` / `special.background` |
 | Text | `color7`, then `color15`, then `special.foreground` |
 | Accent (keys, spinner, prompts) | `color4`, then `color6` |
+| Second accent (decorative rule) | `color6`, then `color14` |
 | Success / Warning / Error | `color2` / `color3` / `color1` |
 | Dim text | `color8` |
+
+No background is ever painted — the frame leaves every cell's background untouched, so your terminal's own surface (transparency, blur, wallpaper) shows through exactly as it does in a plain shell.
 
 No file, no palette → your terminal's own defaults. `WAL_COLORS_FILE` overrides the path for testing.
 
