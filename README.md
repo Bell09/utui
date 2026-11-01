@@ -15,7 +15,7 @@ It reimplements the `yt-x` workflow as a single native binary: no shell script, 
 - **Playback** — video with `mpv`, or audio-only mode. Utui hands the URL straight to the player.
 - **Downloads** — individual video or MP3 audio, organized under `download_dir/video` and `download_dir/audio`, with live progress in the status bar.
 - **Library** — locally saved videos and watch history, stored as JSON.
-- **Cookie-backed feeds** — Subscriptions, Watch Later, and Liked videos via `yt-dlp --cookies-from-browser`.
+- **Cookie-backed feeds** — the YouTube home feed (My Feeds), Subscriptions, Watch Later, and Liked videos via `yt-dlp --cookies-from-browser`.
 - **Feeds on launch** — Utui reopens the feed you were viewing when you last quit, so content is on screen immediately.
 - **pywal colors** — when `~/.cache/wal/colors.json` exists (written by [pywal](https://github.com/dylanaraps/pywal)), the wallpaper's 16-color palette drives the interface: text uses the palette foreground, and accent/success/warning/error/dim all map to palette colors — while the background stays your terminal's own (transparency included). Without pywal, Utui uses your terminal's own colors with a cyan accent.
 - **Scriptable** — `--json` gives clean machine-readable output for scripts and pipelines.
@@ -84,7 +84,7 @@ While a download is running, progress appears in the status bar. Downloads never
 
 ## Cookie-backed feeds
 
-Subscriptions, Watch Later, and Liked videos need YouTube cookies.
+My Feeds, Subscriptions, Watch Later, and Liked videos need YouTube cookies.
 
 1. Set your browser in `~/.config/utui/config.toml`:
 
@@ -142,7 +142,7 @@ The interface is compact by design: the search prompt with its decorative rule u
 
 The search prompt is always visible in its own top row (placeholder: `/ search youtube · filters`). Press `/` to focus it — the row shows your query with a cursor and the status line switches to the live hint (`enter opens this url` once a URL is detected, `filter :…` once you type a colon filter).
 
-Watch Later, Liked videos, Saved videos, and History sit on the shortcut line right under the search rule (` 1 Watch Later  ·  2 Liked videos  ·  3 Saved videos  ·  4 History`); the entry for the feed you have open is highlighted in the accent color. Subscriptions stays reachable via `5` (and the hidden `f` shortcut, and via last-feed restore).
+My Feeds, Watch Later, Liked videos, Saved videos, and History sit on the shortcut line right under the search rule (`1. My Feeds  ·  2. Watch Later  ·  3. Liked videos  ·  4. Saved videos  ·  5. History`); the entry for the feed you have open is highlighted in the accent color. My Feeds is the YouTube home page itself and follows the same cookie rule as Watch Later and Liked videos — YouTube only serves a personalized home feed to signed-in visitors. Subscriptions stays reachable via the `f` shortcut (and via last-feed restore).
 
 When Utui opens it lands in the last-viewed feed (see *Feeds on launch* below), so content is on screen immediately, with the selected video's thumbnail and details in the preview pane.
 
@@ -150,8 +150,8 @@ The feeds jump like ytmtui's `1`–`5` section keys:
 
 | Key | Action |
 | --- | --- |
-| `1` / `2` / `3` / `4` / `5` | Watch Later / Liked / Saved / History / Subscriptions |
-| `S` / `H` / `f` | Extra letter shortcuts for Saved / History / Subscriptions |
+| `1` / `2` / `3` / `4` / `5` | My Feeds / Watch Later / Liked / Saved / History |
+| `F` / `S` / `H` / `f` | Extra letter shortcuts for My Feeds / Saved / History / Subscriptions |
 | `Enter` with an empty list | Open the highlighted feed |
 
 ## Search filters
@@ -192,7 +192,7 @@ audio_args = [
 results = 50
 download_dir = "/home/you/Videos/utui"
 
-# Optional, for Subscriptions / Watch Later / Liked videos:
+# Optional, for My Feeds / Subscriptions / Watch Later / Liked videos:
 # cookies_browser = "firefox"
 
 # Write likes and Watch Later to your YouTube account (needs cookies_browser).

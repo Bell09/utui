@@ -397,6 +397,19 @@ pub fn visible_home_items() -> impl Iterator<Item = &'static HomeItem> {
 }
 
 pub const HOME_ITEMS: &[HomeItem] = &[
+    // The YouTube home page itself — the personalized "My Feeds" view.
+    // Cookie-gated like Watch Later and Liked: YouTube serves logged-out
+    // visitors an empty home page, so it syncs through cookies_browser.
+    HomeItem {
+        key: "F",
+        title: "My Feeds",
+        action: HomeAction::Remote {
+            title: "My Feeds",
+            url: "https://www.youtube.com/",
+            auth: true,
+        },
+        hidden: false,
+    },
     HomeItem {
         key: "w",
         title: "Watch Later",
@@ -973,9 +986,10 @@ impl App {
             // The action menu moved off Enter, which now plays.
             KeyCode::Char('m') => self.open_actions(),
 
-            // Feed jumps by digit (the home bar shows them); the leftover
-            // letters S/H/f still work. w and l are toggles now, not jumps.
-            KeyCode::Char(letter @ ('f' | 'S' | 'H')) => {
+            // Feed jumps by digit (the home bar shows them, 1. My Feeds
+            // first); the leftover letters F/S/H/f still work. w and l are
+            // toggles now, not jumps.
+            KeyCode::Char(letter @ ('f' | 'F' | 'S' | 'H')) => {
                 self.open_home_item_by_key(&letter.to_string())
             }
             KeyCode::Char(digit @ '1'..='5') => {

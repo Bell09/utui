@@ -58,11 +58,15 @@ fn draw_home_menu(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
+    // "1. My Feeds  ·  2. Watch Later  ·  …" on wide rows; narrow rows
+    // drop to single-space separators so all five digits still fit.
+    let separator = if area.width < 92 { " · " } else { "  ·  " };
+
     let items: Vec<&HomeItem> = visible_home_items().collect();
     let mut spans: Vec<Span<'static>> = Vec::new();
     for (index, item) in items.iter().enumerate() {
         if index > 0 {
-            spans.push(Span::styled("  ·  ", Style::default().fg(*MUTED)));
+            spans.push(Span::styled(separator, Style::default().fg(*MUTED)));
         }
         let selected = index == app.home_index;
         let key_style = if selected {
@@ -76,9 +80,10 @@ fn draw_home_menu(frame: &mut Frame, area: Rect, app: &mut App) {
             Style::default().fg(*TEXT)
         };
         // The bar shows the digit that jumps to each feed — w/l became
-        // toggles, so the letters no longer all work as shortcuts.
-        let hint = (index + 1).to_string();
-        spans.push(Span::styled(format!(" {hint}"), key_style));
+        // toggles, so the letters no longer all work as shortcuts. The
+        // digit carries the dot ("1.") and the separator owns the padding,
+        // so "·" sits in exactly two spaces on both sides.
+        spans.push(Span::styled(format!("{}.", index + 1), key_style));
         spans.push(Span::styled(format!(" {}", item.title), title_style));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -624,14 +629,14 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         Line::from(""),
         section("feeds"),
         hint_line(&[
-            ("1", "watch later"),
-            ("2", "liked"),
-            ("3", "saved"),
-            ("4", "history"),
-            ("5", "subs"),
+            ("1", "my feeds"),
+            ("2", "watch later"),
+            ("3", "liked"),
+            ("4", "saved"),
+            ("5", "history"),
         ]),
         Line::from(Span::styled(
-            "letters S H f still jump to saved · history · subs",
+            "letters F S H f still jump to my feeds · saved · history · subs",
             Style::default().fg(*MUTED),
         )),
         Line::from(""),
