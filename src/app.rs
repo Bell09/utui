@@ -29,6 +29,8 @@ pub enum FeedKind {
     Playlist,
     Saved,
     History,
+    /// The play queue: a local list of everything queued with X/Z.
+    Queue,
 }
 
 impl FeedKind {
@@ -40,6 +42,7 @@ impl FeedKind {
             Self::Playlist => "PLAYLIST",
             Self::Saved => "LOCAL COLLECTION",
             Self::History => "WATCHED LOCALLY",
+            Self::Queue => "PLAY QUEUE",
         }
     }
 }
@@ -241,6 +244,8 @@ impl TextInput {
 pub enum ActionKind {
     Play,
     PlayAudio,
+    QueueNext,
+    QueueEnd,
     Download,
     DownloadAudio,
     Channel,
@@ -288,8 +293,10 @@ pub const QUALITIES: &[(&str, u32)] = &[
 
 #[derive(Debug)]
 pub enum Effect {
+    /// Hand one video — or a whole queue tail — to the player as a single
+    /// mpv invocation; multiple URLs play back to back as one playlist.
     Play {
-        video: Video,
+        videos: Vec<Video>,
         audio: bool,
     },
     Download {
@@ -859,10 +866,183 @@ impl App {
         self.finish_local_feed();
     }
 
+    /// The play queue as a local list, in the order mpv will play the videos
+    /// back to back. `push` remembers the feed you came from so `b` steps out.
+    pub fn show_queue(&mut self, push: bool) {
+        if push && self.feed.kind != FeedKind::Queue && !self.feed.items.is_empty() {
+            self.stack.push(self.feed.clone());
+        }
+        let items = self.store.queue.clone();
+        self.feed = Feed {
+            title: "Queue".to_string(),
+            source: "utui://queue".to_string(),
+            kind: FeedKind::Queue,
+            subtitle: format!("{} QUEUED", items.len()),
+            notice: if items.is_empty() {
+                Some("Nothing queued. Press `X` on a result to play it next, `Z` to add it at the end.".to_string())
+            } else {
+                None
+            },
+            items,
+            auth: false,
+            fetched_at: now_unix(),
+        };
+        self.finish_local_feed();
+    }
+
+    /// `z`: open the play queue page, remembering the feed you were on.
+    pub fn open_queue(&mut self) {
+        if self.feed.kind == FeedKind::Queue {
+            return;
+        }
+        self.show_queue(true);
+    }
+
+    /// Keep the open queue page in step with the store after an edit.
+    fn sync_queue_feed(&mut self) {
+        if self.feed.kind != FeedKind::Queue {
+            return;
+        }
+        self.feed.items = self.store.queue.clone();
+        self.feed.subtitle = format!("{} QUEUED", self.feed.items.len());
+        if self.feed.items.is_empty() {
+            self.feed.notice = Some(
+                "Nothing queued. Press `X` on a result to play it next, `Z` to add it at the end."
+                    .to_string(),
+            );
+            self.table_state.select(None);
+        } else {
+            self.feed.notice = None;
+            let last = self.feed.items.len() - 1;
+            let selected = self.table_state.selected().unwrap_or(0).min(last);
+            self.table_state.select(Some(selected));
+        }
+    }
+
+    /// `X`: queue the highlighted video to play next (mpv's playlist front).
+    /// On the queue page it promotes the selected row instead.
+    pub fn queue_selected_next(&mut self) {
+        if self.feed.kind == FeedKind::Queue {
+            self.queue_promote_selected();
+            return;
+        }
+        let Some(video) = self.selected_video().cloned() else {
+            return;
+        };
+        self.store.queue_insert_next(&video);
+        let _ = self.persist();
+        self.sync_queue_feed();
+        self.toast_success(format!("Playing next: {}", video.title));
+    }
+
+    /// `Z`: append the highlighted video to the end of the queue. On the
+    /// queue page it moves the selected row to the end instead.
+    pub fn queue_selected_append(&mut self) {
+        if self.feed.kind == FeedKind::Queue {
+            self.queue_demote_selected();
+            return;
+        }
+        let Some(video) = self.selected_video().cloned() else {
+            return;
+        };
+        self.store.queue_append(&video);
+        let _ = self.persist();
+        self.sync_queue_feed();
+        self.toast_success(format!("Added to the end of the queue: {}", video.title));
+    }
+
+    /// On the queue page, `X` moves the selected row to the front.
+    fn queue_promote_selected(&mut self) {
+        let Some(index) = self.table_state.selected() else {
+            return;
+        };
+        if index == 0 || index >= self.store.queue.len() {
+            return;
+        }
+        let video = self.store.queue.remove(index);
+        self.store.queue.insert(0, video);
+        let _ = self.persist();
+        self.sync_queue_feed();
+        self.table_state.select(Some(0));
+        self.toast_info("Moved to the front of the queue");
+    }
+
+    /// On the queue page, `Z` moves the selected row to the end.
+    fn queue_demote_selected(&mut self) {
+        let Some(index) = self.table_state.selected() else {
+            return;
+        };
+        let len = self.store.queue.len();
+        if len < 2 || index + 1 >= len {
+            return;
+        }
+        let video = self.store.queue.remove(index);
+        self.store.queue.push(video);
+        let _ = self.persist();
+        self.sync_queue_feed();
+        self.table_state.select(Some(len - 1));
+        self.toast_info("Moved to the end of the queue");
+    }
+
+    /// `J`/`K` on the queue page: move the selected video down/up.
+    pub fn queue_move_selected(&mut self, down: bool) {
+        let Some(index) = self.table_state.selected() else {
+            return;
+        };
+        let len = self.store.queue.len();
+        if len < 2 {
+            return;
+        }
+        let swap = if down { index + 1 < len } else { index > 0 };
+        if !swap {
+            return;
+        }
+        let other = if down { index + 1 } else { index - 1 };
+        self.store.queue.swap(index, other);
+        let _ = self.persist();
+        self.sync_queue_feed();
+        self.table_state.select(Some(other));
+    }
+
+    /// `d` on the queue page: drop the selected video.
+    pub fn queue_remove_selected(&mut self) {
+        let Some(index) = self.table_state.selected() else {
+            return;
+        };
+        if index >= self.store.queue.len() {
+            return;
+        }
+        let removed = self.store.queue.remove(index);
+        let _ = self.persist();
+        self.sync_queue_feed();
+        self.toast_info(format!("Removed from the queue: {}", removed.title));
+    }
+
+    /// Enter/Space on the queue page: hand mpv the queue from the selected
+    /// video on — the whole playlist goes over in one invocation.
+    fn play_selected_queue(&mut self, audio: bool) {
+        let Some(start) = self.table_state.selected() else {
+            return;
+        };
+        let videos: Vec<Video> = self.store.queue.iter().skip(start).cloned().collect();
+        if videos.is_empty() {
+            return;
+        }
+        // History records only the video playback actually starts with.
+        if let Some(first) = videos.first() {
+            self.record_watch(first);
+        }
+        self.pending_effect = Some(Effect::Play { videos, audio });
+    }
+
     fn finish_local_feed(&mut self) {
         self.fetch_id = self.fetch_id.wrapping_add(1);
         self.pending_fetch = None;
         self.loading = false;
+        // Local lists hold everything at once; a queue opened over a paged
+        // feed must not inherit its window.
+        self.feed_page = 1;
+        self.feed_last_page = false;
         // Keep the caller's view: the bar opens these feeds in place on Home,
         // while a refresh from Browse should stay in Browse.
         self.overlay = None;
@@ -870,6 +1050,8 @@ impl App {
         match self.feed.kind {
             FeedKind::Saved => self.remember_home_feed("S"),
             FeedKind::History => self.remember_home_feed("H"),
+            // The queue is not a launch feed; `z` reopens it in one key.
+            FeedKind::Queue => {}
             _ => self.remember_last_feed(),
         }
     }
@@ -1001,8 +1183,22 @@ impl App {
     /// One key map for both list views (Home and Browse), aligned with the
     /// ytmtui bindings: Enter/Space play, `m` opens the action menu, `w`/`l`/`s`
     /// toggle Watch Later / like / save, `d` picks a quality to download,
-    /// `1`-`5` jump to the feeds.
+    /// `1`-`5` jump to the feeds. The play queue adds `z`/`X`/`Z` everywhere
+    /// and J/K/d/Enter on the queue page itself.
     fn handle_list_key(&mut self, key: KeyEvent) {
+        // The queue page owns a few extra keys: J/K reorder the rows, `d`
+        // removes one (ytmtui parity), and Enter/Space play the queue from
+        // the highlighted video rather than a single one.
+        if self.feed.kind == FeedKind::Queue {
+            match key.code {
+                KeyCode::Char('J') => return self.queue_move_selected(true),
+                KeyCode::Char('K') => return self.queue_move_selected(false),
+                KeyCode::Char('d') => return self.queue_remove_selected(),
+                KeyCode::Enter | KeyCode::Char(' ') => return self.play_selected_queue(false),
+                KeyCode::Char('A') => return self.play_selected_queue(true),
+                _ => {}
+            }
+        }
         match key.code {
             // Navigation: arrows, j/k, n/p (next/previous), g/G, paging.
             KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h' | 'p') => {
@@ -1056,6 +1252,12 @@ impl App {
             KeyCode::Char('d') => self.open_quality(),
             KeyCode::Char('D') => self.download_selected(true, None),
             KeyCode::Char('R') => self.refresh(),
+
+            // The play queue, ytmtui style: z opens the queue page, X queues
+            // the video to play next, Z appends it at the end.
+            KeyCode::Char('z') => self.open_queue(),
+            KeyCode::Char('X') => self.queue_selected_next(),
+            KeyCode::Char('Z') => self.queue_selected_append(),
 
             // Paging through long lists, yt-x style: N next page, P previous.
             KeyCode::Char('N') => self.page_feed(true),
@@ -1173,6 +1375,8 @@ impl App {
         match kind {
             ActionKind::Play => self.play_selected(false),
             ActionKind::PlayAudio => self.play_selected(true),
+            ActionKind::QueueNext => self.queue_selected_next(),
+            ActionKind::QueueEnd => self.queue_selected_append(),
             ActionKind::Download => self.open_quality(),
             ActionKind::DownloadAudio => self.download_selected(true, None),
             ActionKind::Channel => self.open_selected_channel(),
@@ -1201,7 +1405,10 @@ impl App {
             return;
         };
         self.record_watch(&video);
-        self.pending_effect = Some(Effect::Play { video, audio });
+        self.pending_effect = Some(Effect::Play {
+            videos: vec![video],
+            audio,
+        });
     }
 
     /// `d` and the menu's Download row open the quality picker on the right;
@@ -1512,12 +1719,15 @@ impl App {
 
     /// Move one page through the current remote list: `N` forward, `P` back —
     /// the keyboard twin of yt-x's Next/Previous menu entries. Local lists
-    /// (Saved, History) hold everything at once and never page.
+    /// (Saved, History, Queue) hold everything at once and never page.
     pub fn page_feed(&mut self, forward: bool) {
         if self.loading || self.feed.source.is_empty() {
             return;
         }
-        if matches!(self.feed.kind, FeedKind::Saved | FeedKind::History) {
+        if matches!(
+            self.feed.kind,
+            FeedKind::Saved | FeedKind::History | FeedKind::Queue
+        ) {
             self.toast_info("This list holds all its items — no pages");
             return;
         }
@@ -1547,6 +1757,10 @@ impl App {
             FeedKind::History => {
                 self.show_history(false);
                 self.toast_info("History refreshed");
+            }
+            FeedKind::Queue => {
+                self.show_queue(false);
+                self.toast_info("Queue refreshed");
             }
             _ => {
                 if self.feed.source.is_empty() {
@@ -1903,6 +2117,8 @@ fn build_actions(video: &Video, saved: bool) -> Vec<Action> {
     let mut actions = vec![
         Action::new(ActionKind::Play, "Play video", "↵"),
         Action::new(ActionKind::PlayAudio, "Play audio only", "A"),
+        Action::new(ActionKind::QueueNext, "Queue to play next", "X"),
+        Action::new(ActionKind::QueueEnd, "Queue at the end", "Z"),
         Action::new(ActionKind::Download, "Download video", "d"),
         Action::new(ActionKind::DownloadAudio, "Download audio", "D"),
     ];
@@ -2083,5 +2299,184 @@ mod tests {
         let spec = app.pending_fetch.take().expect("refresh queues a fetch");
         assert_eq!(spec.page, 3);
         assert!(spec.bypass_cache);
+    }
+
+    fn search_feed() -> Feed {
+        Feed {
+            title: "Search · rust".into(),
+            source: "https://example.com".into(),
+            kind: FeedKind::Search,
+            subtitle: "SEARCH  ·  3 RESULTS".into(),
+            items: videos(3),
+            notice: None,
+            auth: false,
+            fetched_at: 0,
+        }
+    }
+
+    #[test]
+    fn x_queues_next_and_z_appends() {
+        let mut app = app();
+        app.feed = search_feed();
+        app.table_state.select(Some(0));
+        app.handle_key(key(KeyCode::Char('X')));
+        assert_eq!(
+            app.store
+                .queue
+                .iter()
+                .map(|video| video.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["v0"],
+            "X queues the video to play next"
+        );
+
+        app.table_state.select(Some(2));
+        app.handle_key(key(KeyCode::Char('Z')));
+        assert_eq!(
+            app.store
+                .queue
+                .iter()
+                .map(|video| video.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["v0", "v2"],
+            "Z appends at the end"
+        );
+
+        // The queue survives a refresh of the feed and can be re-queued.
+        app.handle_key(key(KeyCode::Char('X')));
+        assert_eq!(app.store.queue.len(), 3, "duplicates are allowed");
+        assert_eq!(app.store.queue[0].id, "v2");
+    }
+
+    #[test]
+    fn z_opens_the_queue_page_and_b_comes_back() {
+        let mut app = app();
+        app.feed = search_feed();
+        app.table_state.select(Some(1));
+
+        app.handle_key(key(KeyCode::Char('z')));
+        assert_eq!(app.feed.kind, FeedKind::Queue);
+        assert_eq!(app.feed.source, "utui://queue");
+        assert!(app.feed.items.is_empty(), "nothing queued yet");
+        assert_eq!(
+            app.stack.len(),
+            1,
+            "the feed you came from stays on the back stack"
+        );
+
+        // b returns to the feed you opened the queue from.
+        app.handle_key(key(KeyCode::Char('b')));
+        assert_eq!(app.feed.kind, FeedKind::Search);
+        assert!(app.stack.is_empty());
+    }
+
+    #[test]
+    fn queue_page_edits_reorder_remove_and_play_the_tail() {
+        let mut app = app();
+        app.store.queue = videos(3);
+        app.open_queue();
+        app.table_state.select(Some(0));
+
+        // J/K move the selected row down and up, persisting the order.
+        app.handle_key(key(KeyCode::Char('J')));
+        assert_eq!(
+            app.store
+                .queue
+                .iter()
+                .map(|video| video.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["v1", "v0", "v2"]
+        );
+        assert_eq!(
+            app.table_state.selected(),
+            Some(1),
+            "the row travels with J"
+        );
+        app.handle_key(key(KeyCode::Char('K')));
+        assert_eq!(app.store.queue[0].id, "v0");
+
+        // d removes the selected row.
+        app.handle_key(key(KeyCode::Char('d')));
+        assert_eq!(
+            app.store
+                .queue
+                .iter()
+                .map(|video| video.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["v1", "v2"],
+            "d drops the row from the queue"
+        );
+        assert_eq!(app.table_state.selected(), Some(0));
+
+        // Enter plays the queue from the highlighted row to the end.
+        app.handle_key(key(KeyCode::Char('J')));
+        assert_eq!(app.table_state.selected(), Some(1));
+        // J swapped v2 to the front, so row 1 now holds v1 — Enter plays
+        // from there on.
+        app.handle_key(key(KeyCode::Enter));
+        match app.take_effect() {
+            Some(Effect::Play { videos, audio }) => {
+                assert!(!audio);
+                assert_eq!(
+                    videos
+                        .iter()
+                        .map(|video| video.id.as_str())
+                        .collect::<Vec<_>>(),
+                    vec!["v1"],
+                    "Enter plays from here on, not just one video"
+                );
+            }
+            other => panic!("expected a play effect, got {other:?}"),
+        }
+
+        // A on the queue page plays the tail as audio.
+        app.table_state.select(Some(0));
+        app.handle_key(key(KeyCode::Char('A')));
+        match app.take_effect() {
+            Some(Effect::Play { videos, audio }) => {
+                assert!(audio);
+                assert_eq!(videos.len(), 2, "v1 and v2 play audio-only");
+            }
+            other => panic!("expected a play effect, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn queue_page_reset_the_window_and_never_pages() {
+        let mut app = app();
+        app.feed = watch_later_feed();
+        app.feed_page = 3;
+        app.feed_last_page = true;
+        app.store.queue = videos(2);
+
+        // Opening the queue over a paged feed starts back at page 1.
+        app.open_queue();
+        assert_eq!(app.feed_page, 1, "the queue never inherits a page window");
+        assert!(!app.feed_last_page);
+
+        // N/P stay quiet on the queue page.
+        app.page_feed(true);
+        assert_eq!(app.feed_page, 1);
+        assert!(app.pending_fetch.is_none());
+
+        // The queue is not remembered as the launch feed.
+        app.handle_key(key(KeyCode::Char('b')));
+        app.store.last_feed = None;
+        app.open_queue();
+        assert!(
+            app.store.last_feed.is_none(),
+            "the queue is not a launch feed"
+        );
+    }
+
+    #[test]
+    fn menu_queue_rows_act_like_x_and_z() {
+        let mut app = app();
+        app.feed = search_feed();
+        app.table_state.select(Some(1));
+        app.open_actions();
+        app.handle_key(key(KeyCode::Char('X')));
+        assert_eq!(app.store.queue.len(), 1);
+        assert_eq!(app.store.queue[0].id, "v1");
     }
 }

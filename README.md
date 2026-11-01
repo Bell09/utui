@@ -15,6 +15,7 @@ The classic terminal-YouTube workflow as a single native binary: no shell script
 - **Playback** — video with `mpv`, or audio-only mode. Utui hands the URL straight to the player.
 - **Downloads** — individual video or MP3 audio, organized under `download_dir/video` and `download_dir/audio`, with live progress in the status bar.
 - **Library** — locally saved videos and watch history, stored as JSON.
+- **Play queue** — `X` queues a video to play next, `Z` queues it at the end, and `z` opens the queue as its own page where `J`/`K` reorder, `d` removes, and `Enter` hands the whole tail to `mpv` as one playlist. The queue is stored with the rest of your state and survives restarts.
 - **Cookie-backed feeds** — the YouTube home feed (My Feeds), Subscriptions, Watch Later, and Liked videos via `yt-dlp --cookies-from-browser`.
 - **Feeds on launch** — Utui reopens the feed you were viewing when you last quit, so content is on screen immediately.
 - **Wallpaper theming** — [pywal](https://github.com/dylanaraps/pywal), [wallust](https://github.com/Fuffy/wallust), and [matugen](https://github.com/0xAdarsh/matugen) are all detected: their cache/config directories and JSON template outputs are scanned, the newest valid palette wins, and it is **reloaded live** — change your wallpaper and the running TUI repaints within a second, no restart. Text, accent, warning, error, and dim map to palette colors, while the background stays your terminal's own (transparency included). Without any theming tool, Utui uses your terminal's own colors with a cyan accent.
@@ -168,7 +169,27 @@ Home and Browse share one key map: navigation and playback follow the usual play
 | `o` | Open in browser |
 | `R` | Refresh the current feed (bypasses cache) |
 | `N` / `P` | Next / previous page of the list — yt-x style windowed paging on My Feeds, Watch Later, Liked, channels, playlists, and search (pages of `results` from the config; a `page n · N next · P previous` banner names the window). Numbering is continuous across pages: page 1 is 1-50, page 2 is 51-100, and so on |
+| `z` | Open the play queue (see below) |
+| `X` | Queue the highlighted video to play next (at the front of the queue) |
+| `Z` | Queue the highlighted video at the end of the queue |
 | `b` / `Esc` | Back (with a stacked feed; `Esc` also cancels a running fetch) |
+
+### Play queue (ytmtui's `z` page)
+
+The play queue is a "watch these next" list you build while browsing. `X` queues the highlighted video to play next (front of the queue), `Z` queues it at the end — the same bindings ytmtui uses. `z` opens the queue as its own page; `b`/`Esc` steps back to wherever you came from.
+
+On the queue page:
+
+| Key | Action |
+| --- | --- |
+| `J` / `K` | Move the selected row down / up |
+| `d` | Remove the selected row |
+| `X` / `Z` | Move the selected row to the front / the end |
+| `Enter` / `Space` | Play the queue from the highlighted video to the end — one `mpv` session, URLs back to back as a single playlist |
+| `A` | Same, audio only |
+| `b` / `Esc` | Back to the feed you opened it from |
+
+The queue is saved in `state.json` and survives restarts; it is capped at 250 entries and never deduplicated (queueing the same video twice is intentional). When you press `Enter`, `mpv` receives every URL after the highlighted one in a single invocation and plays them in order; only the first video of the batch lands in History. A `queue · J/K move · d remove · ↵ play from here` banner names the keys on the queue page.
 
 ### Home
 

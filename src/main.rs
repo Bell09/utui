@@ -273,14 +273,21 @@ async fn run_tui(app: &mut App) -> Result<()> {
 
             if let Some(effect) = app.take_effect() {
                 match effect {
-                    Effect::Play { video, audio } => {
+                    Effect::Play { videos, audio } => {
                         suspend_tui();
-                        let outcome = play_media(&app.config, &video, audio);
+                        let outcome = play_media(&app.config, &videos, audio);
                         terminal = ratatui::init();
                         terminal.clear()?;
                         app.clear_thumbnail();
                         match outcome {
-                            Ok(()) => app.toast_info(format!("Finished · {}", video.title)),
+                            Ok(()) => {
+                                let message = if videos.len() == 1 {
+                                    format!("Finished · {}", videos[0].title)
+                                } else {
+                                    format!("Finished · {} queued videos", videos.len())
+                                };
+                                app.toast_info(message);
+                            }
                             Err(error) => app.toast_error(error.to_string()),
                         }
                     }
@@ -408,18 +415,37 @@ fn suspend_tui() {
     ratatui::restore();
 }
 
-fn play_media(config: &Config, video: &yt::Video, audio: bool) -> Result<()> {
-    let args = if audio {
+/// The full argument list for one player run. A single video pins its title
+/// with `--force-media-title`; a queue hands mpv every URL after `--` so it
+/// plays them back to back in order.
+fn player_args(config: &Config, videos: &[yt::Video], audio: bool) -> Vec<String> {
+    let base = if audio {
         &config.audio_args
     } else {
         &config.video_args
     };
+    let mut args: Vec<String> = base.to_vec();
+    match videos {
+        [] => {}
+        [single] => {
+            args.push(format!("--force-media-title={}", single.title));
+            args.push("--".to_string());
+            args.push(single.url.clone());
+        }
+        many => {
+            args.push("--".to_string());
+            args.extend(many.iter().map(|video| video.url.clone()));
+        }
+    }
+    args
+}
+
+fn play_media(config: &Config, videos: &[yt::Video], audio: bool) -> Result<()> {
+    if videos.is_empty() {
+        bail!("nothing to play");
+    }
     let mut command = StdCommand::new(&config.player);
-    command
-        .args(args)
-        .arg(format!("--force-media-title={}", video.title))
-        .arg("--")
-        .arg(&video.url);
+    command.args(player_args(config, videos, audio));
     let status = command
         .status()
         .with_context(|| format!("could not launch player {}", config.player))?;
@@ -547,7 +573,9 @@ async fn download_media(
 
 #[cfg(test)]
 mod tests {
-    use super::video_format;
+    use super::{player_args, video_format};
+    use crate::config::Config;
+    use crate::yt::Video;
 
     #[test]
     fn quality_cap_builds_selector() {
@@ -560,5 +588,53 @@ mod tests {
             "bv*[height<=160]+ba/b[height<=160]"
         );
         assert_eq!(video_format(None), "bestvideo*+bestaudio/best");
+    }
+
+    fn video(id: &str) -> Video {
+        Video {
+            id: id.to_string(),
+            title: format!("Title {id}"),
+            url: format!("https://youtu.be/{id}"),
+            ..Video::default()
+        }
+    }
+
+    #[test]
+    fn a_single_video_pins_its_title() {
+        let config = Config::default();
+        let args = player_args(&config, &[video("a")], false);
+        // The config's own args come first, untouched, then the pinned
+        // title, then everything after `--` is a URL for mpv.
+        let separator = args.iter().position(|arg| arg == "--").unwrap();
+        assert_eq!(args[separator - 1], "--force-media-title=Title a");
+        assert_eq!(&args[separator..], ["--", "https://youtu.be/a"]);
+    }
+
+    #[test]
+    fn a_queue_hands_mpv_every_url_in_order() {
+        let config = Config::default();
+        let args = player_args(&config, &[video("a"), video("b"), video("c")], false);
+        // No forced title when several videos are queued: mpv titles each
+        // entry itself.
+        assert!(!args
+            .iter()
+            .any(|arg| arg.starts_with("--force-media-title")));
+        let separator = args.iter().position(|arg| arg == "--").unwrap();
+        assert_eq!(
+            &args[separator..],
+            [
+                "--",
+                "https://youtu.be/a",
+                "https://youtu.be/b",
+                "https://youtu.be/c"
+            ]
+        );
+    }
+
+    #[test]
+    fn audio_mode_uses_the_audio_args() {
+        let config = Config::default();
+        let args = player_args(&config, &[video("a"), video("b")], true);
+        assert_eq!(&args[..config.audio_args.len()], &config.audio_args);
     }
 }

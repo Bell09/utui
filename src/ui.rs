@@ -1,5 +1,6 @@
 use crate::app::{
-    visible_home_items, Action, App, HomeItem, Overlay, ThumbnailState, ToastKind, View, QUALITIES,
+    visible_home_items, Action, App, FeedKind, HomeItem, Overlay, ThumbnailState, ToastKind, View,
+    QUALITIES,
 };
 use crate::theme::Theme;
 use crate::util::{format_date, format_duration, format_views, relative_time, truncate};
@@ -153,6 +154,7 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
 
     // A paged feed wears a one-row banner naming the window — which page is
     // open and the keys that move it (yt-x's Next/Previous, bound to N/P).
+    // The play queue wears one naming the keys that edit and play it.
     let area = if app.feed_page > 1 {
         let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
         let banner = Line::from(vec![
@@ -168,6 +170,19 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
             Span::styled(" next  ", Style::default().fg(app.theme.muted)),
             Span::styled("P", Style::default().fg(app.theme.accent)),
             Span::styled(" previous", Style::default().fg(app.theme.muted)),
+        ]);
+        frame.render_widget(Paragraph::new(banner), rows[0]);
+        rows[1]
+    } else if app.feed.kind == FeedKind::Queue {
+        let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
+        let banner = Line::from(vec![
+            Span::styled(" queue ", Style::default().fg(app.theme.muted)),
+            Span::styled("J/K", Style::default().fg(app.theme.accent)),
+            Span::styled(" move  ", Style::default().fg(app.theme.muted)),
+            Span::styled("d", Style::default().fg(app.theme.accent)),
+            Span::styled(" remove  ", Style::default().fg(app.theme.muted)),
+            Span::styled("↵", Style::default().fg(app.theme.accent)),
+            Span::styled(" play from here", Style::default().fg(app.theme.muted)),
         ]);
         frame.render_widget(Paragraph::new(banner), rows[0]);
         rows[1]
@@ -441,7 +456,12 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     } else {
         hints.push(("1-5", "feeds"));
     }
-    hints.extend_from_slice(&[("/", "search"), ("?", "help"), ("q", "quit")]);
+    hints.extend_from_slice(&[
+        ("z", "queue"),
+        ("/", "search"),
+        ("?", "help"),
+        ("q", "quit"),
+    ]);
 
     // Wide terminals keep the roomier two-space separator; narrow ones
     // thin the guide instead so the message never drops below a few
@@ -761,6 +781,23 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
             ],
             &app.theme,
         ),
+        Line::from(""),
+        section("queue", &app.theme),
+        hint_line(
+            &[
+                ("z", "open queue"),
+                ("X", "play next"),
+                ("Z", "add last"),
+                ("J/K", "move"),
+                ("d", "remove"),
+                ("enter", "play from here"),
+            ],
+            &app.theme,
+        ),
+        Line::from(Span::styled(
+            "the queue plays in order through mpv — one session, one playlist",
+            Style::default().fg(app.theme.muted),
+        )),
         Line::from(""),
         section("filters", &app.theme),
         Line::from(Span::styled(
@@ -1110,5 +1147,46 @@ mod tests {
         let all = screen_text(&terminal);
         assert!(all.contains("51"), "page 2 must start at 51: {all}");
         assert!(all.contains("53"), "page 2 ends at 53: {all}");
+    }
+
+    #[test]
+    fn queue_page_renders_queued_videos_and_keys() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = app();
+        app.view = View::Browse;
+        app.store.queue = vec![
+            Video {
+                id: "a".into(),
+                title: "First queued video".into(),
+                ..Video::default()
+            },
+            Video {
+                id: "b".into(),
+                title: "Second queued video".into(),
+                ..Video::default()
+            },
+        ];
+        app.show_queue(false);
+        app.table_state.select(Some(0));
+
+        terminal
+            .draw(|frame| draw(frame, &mut app, Instant::now()))
+            .unwrap();
+        let all = screen_text(&terminal);
+        assert!(all.contains("First queued video"), "{all}");
+        assert!(all.contains("Second queued video"), "{all}");
+        // The banner names the keys that edit and play the queue.
+        assert!(all.contains("J/K"), "queue banner: {all}");
+        assert!(all.contains("play from here"), "queue banner: {all}");
+
+        // The empty queue explains how to fill it instead of a blank list.
+        app.store.queue.clear();
+        app.show_queue(false);
+        terminal
+            .draw(|frame| draw(frame, &mut app, Instant::now()))
+            .unwrap();
+        let all = screen_text(&terminal);
+        assert!(all.contains("Nothing queued"), "empty notice: {all}");
     }
 }

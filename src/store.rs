@@ -8,6 +8,9 @@ use std::path::Path;
 const MAX_SAVED: usize = 1_000;
 const MAX_HISTORY: usize = 250;
 const MAX_SEARCHES: usize = 60;
+/// The play queue stays small on purpose: it is a "play these next" list,
+/// not a library.
+const MAX_QUEUE: usize = 250;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryEntry {
@@ -34,6 +37,8 @@ pub struct Store {
     pub saved: Vec<Video>,
     pub liked: Vec<Video>,
     pub watch_later: Vec<Video>,
+    /// The play queue, in play order: the front plays next.
+    pub queue: Vec<Video>,
     pub history: Vec<HistoryEntry>,
     /// Newest first.
     pub search_history: Vec<String>,
@@ -65,6 +70,10 @@ impl Store {
         self.liked.truncate(MAX_SAVED);
         deduplicate_videos(&mut self.watch_later);
         self.watch_later.truncate(MAX_SAVED);
+
+        // The queue may hold the same video twice on purpose (play it
+        // twice), so it is only bounded — never deduplicated.
+        self.queue.truncate(MAX_QUEUE);
 
         let mut seen = std::collections::HashSet::new();
         self.history
@@ -101,6 +110,18 @@ impl Store {
 
     pub fn is_watch_later(&self, id: &str) -> bool {
         self.watch_later.iter().any(|video| video.id == id)
+    }
+
+    /// `X`: queue a video to play next — the front of the queue.
+    pub fn queue_insert_next(&mut self, video: &Video) {
+        self.queue.insert(0, video.clone());
+        self.queue.truncate(MAX_QUEUE);
+    }
+
+    /// `Z`: queue a video at the end, after everything already queued.
+    pub fn queue_append(&mut self, video: &Video) {
+        self.queue.push(video.clone());
+        self.queue.truncate(MAX_QUEUE);
     }
 
     /// Forces the liked-mirror into an exact state (used after account sync).
@@ -266,5 +287,53 @@ mod tests {
         store.set_watch_later(&queued, false);
         assert!(!store.is_watch_later("wl"));
         assert_eq!(store.watch_later.len(), 1);
+    }
+
+    fn queued(id: &str) -> Video {
+        Video {
+            id: id.to_string(),
+            ..Video::default()
+        }
+    }
+
+    #[test]
+    fn queue_is_bounded_but_never_deduplicated() {
+        let mut store = Store::default();
+        let same = queued("same");
+        for _ in 0..(MAX_QUEUE + 20) {
+            store.queue_append(&same);
+        }
+        assert_eq!(store.queue.len(), MAX_QUEUE, "capped at the queue limit");
+        assert!(
+            store.queue.iter().all(|video| video.id == "same"),
+            "duplicates are intentional in the queue"
+        );
+
+        let overfull: Vec<Video> = (0..MAX_QUEUE + 5)
+            .map(|index| queued(&format!("v{index}")))
+            .collect();
+        let mut store = Store {
+            queue: overfull,
+            ..Store::default()
+        };
+        store.normalize();
+        assert_eq!(store.queue.len(), MAX_QUEUE);
+        assert_eq!(store.queue[0].id, "v0", "normalize only truncates the tail");
+    }
+
+    #[test]
+    fn queue_insert_next_plays_before_and_append_after() {
+        let mut store = Store::default();
+        store.queue_append(&queued("end"));
+        store.queue_insert_next(&queued("front"));
+        assert_eq!(
+            store
+                .queue
+                .iter()
+                .map(|video| video.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["front", "end"],
+            "X queues to the front, Z to the end"
+        );
     }
 }
