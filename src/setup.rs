@@ -2,8 +2,9 @@
 //!
 //! Authentication in Utui is cookie-based: yt-dlp reads the YouTube session
 //! straight out of a browser cookie jar (`--cookies-from-browser`), and the
-//! account-sync helper rides the same jar. This command picks that browser,
-//! verifies the session (an offline cookie check, then optionally a live
+//! account-sync helper rides the same jar. This command automatically scans
+//! every browser on the machine for a signed-in YouTube session, lets you
+//! pick among the ones that have one, verifies the choice end to end (live
 //! Watch Later fetch), and writes `cookies_browser` / `account_sync` to
 //! `config.toml`. Utui itself never sees or stores a cookie.
 
@@ -103,12 +104,16 @@ const CANDIDATES: &[Candidate] = &[
     },
 ];
 
-/// A candidate resolved against this machine.
+/// A candidate resolved against this machine, plus (when it could hold
+/// cookies) the result of the offline session scan.
 struct Found {
     spec: &'static str,
     display: &'static str,
     found: bool,
+    has_profile: bool,
     note: String,
+    /// `None` when nothing was scanned (browser absent, no profile).
+    session: Option<Session>,
 }
 
 pub async fn run(paths: &Paths, mut config: Config, options: Options) -> Result<()> {
@@ -121,11 +126,16 @@ pub async fn run(paths: &Paths, mut config: Config, options: Options) -> Result<
     println!("utui setup — YouTube sign-in");
     println!();
 
-    let browser = match options.browser.as_deref() {
+    // The helper backs both the offline scan and the sign-in re-check, so
+    // materialize it before any browser resolution happens.
+    sync::prepare_script(&script)?;
+
+    let (browser, mut session) = match options.browser.as_deref() {
         Some(raw) => {
             let spec = normalize_spec(raw);
             validate_spec(&spec)?;
-            spec
+            let session = check_session(&spec, &script).await;
+            (spec, session)
         }
         None => {
             if !interactive {
@@ -134,17 +144,10 @@ pub async fn run(paths: &Paths, mut config: Config, options: Options) -> Result<
                      `--browser <name>` to configure directly, or `--status` to check."
                 );
             }
-            prompt_browser(&config)?
+            prompt_browser(&config, &script).await?
         }
     };
     println!("  browser   {browser}");
-
-    // Offline session check: classify without touching the network. Failures
-    // to read the jar become `Unknown`, never a false "signed out".
-    sync::prepare_script(&script)?;
-    let mut session = sync::session_check(&browser, &script)
-        .await
-        .unwrap_or_else(|error| Session::Unknown(error.to_string()));
     loop {
         match &session {
             Session::SignedIn => {
@@ -165,9 +168,7 @@ pub async fn run(paths: &Paths, mut config: Config, options: Options) -> Result<
                 }
                 open_signin();
                 read_line("Press Enter once you are signed in to re-check ")?;
-                session = sync::session_check(&browser, &script)
-                    .await
-                    .unwrap_or_else(|error| Session::Unknown(error.to_string()));
+                session = check_session(&browser, &script).await;
             }
         }
     }
@@ -189,20 +190,11 @@ pub async fn run(paths: &Paths, mut config: Config, options: Options) -> Result<
         return Ok(());
     }
 
-    // Live verification: Watch Later only exists for a signed-in session, so
-    // a successful fetch proves the whole cookie path end-to-end.
-    let run_probe = if options.no_probe {
-        false
-    } else if interactive {
-        ask_yes_no(
-            "Verify with a live Watch Later fetch (uses the network)?",
-            signed_out_detail.is_none(),
-        )?
-    } else {
-        signed_out_detail.is_none()
-    };
+    // Live verification runs automatically when the offline check could not
+    // prove a session failure — Watch Later only exists for a signed-in
+    // session, so a successful fetch proves the whole cookie path end-to-end.
     let mut probe_error = None;
-    if run_probe {
+    if !options.no_probe && signed_out_detail.is_none() {
         match probe(&browser).await {
             Ok(count) => println!("  probe     ✓ Watch Later returned {count} videos (live)"),
             Err(error) => {
@@ -267,10 +259,7 @@ async fn print_status(paths: &Paths, config: &Config, script: &Path) -> Result<(
     );
     if let Some(browser) = &config.cookies_browser {
         sync::prepare_script(script)?;
-        match sync::session_check(browser, script)
-            .await
-            .unwrap_or_else(|error| Session::Unknown(error.to_string()))
-        {
+        match check_session(browser, script).await {
             Session::SignedIn => println!("  session         ✓ signed in to YouTube via {browser}"),
             Session::SignedOut(detail) => {
                 println!("  session         ✗ {detail}");
@@ -295,28 +284,38 @@ async fn probe(browser: &str) -> Result<usize> {
     Ok(yt::fetch(&spec).await?.items.len())
 }
 
-/// The interactive browser menu: detected browsers, the current setting,
-/// then a number or any spec yt-dlp accepts.
-fn prompt_browser(config: &Config) -> Result<String> {
+/// Offline session check that never fails: read errors classify as `Unknown`.
+async fn check_session(browser: &str, script: &Path) -> Session {
+    sync::session_check(browser, script)
+        .await
+        .unwrap_or_else(|error| Session::Unknown(error.to_string()))
+}
+
+/// The interactive browser menu: detect every browser yt-dlp can read,
+/// automatically scan each one that could hold cookies for a signed-in
+/// YouTube session, then let the user pick — a number, or any spec yt-dlp
+/// accepts. Returns the chosen browser together with its scanned session
+/// (or a fresh check for a browser that was never scanned).
+async fn prompt_browser(config: &Config, script: &Path) -> Result<(String, Session)> {
     println!("Utui signs in through your browser's cookie jar — yt-dlp reads it,");
     println!("Utui never stores cookies itself.");
     println!();
-    println!("Pick the browser you use for YouTube:");
 
     let all = detect(&home_dir(), &env_path());
     let missing: Vec<&str> = all.iter().filter(|f| !f.found).map(|f| f.spec).collect();
-    let present: Vec<Found> = all.into_iter().filter(|f| f.found).collect();
+    let mut present: Vec<Found> = all.into_iter().filter(|f| f.found).collect();
 
-    let default = if present.is_empty() {
-        None
-    } else {
-        config
-            .cookies_browser
-            .as_deref()
-            .and_then(|current| present.iter().position(|f| f.spec == current))
-            .map(|index| index + 1)
-            .or(Some(1))
-    };
+    // Automatic cookie scan: read each found browser's jar offline. Browsers
+    // with no profile yet cannot hold cookies and are skipped.
+    if present.iter().any(|f| f.has_profile) {
+        println!("Scanning browsers for a YouTube session…");
+        println!();
+    }
+    for candidate in present.iter_mut().filter(|f| f.has_profile) {
+        candidate.session = Some(check_session(candidate.spec, script).await);
+    }
+
+    let default = default_choice(&present, config.cookies_browser.as_deref());
     if let Some(current) = &config.cookies_browser {
         println!("  current setting: {current}");
     }
@@ -325,7 +324,7 @@ fn prompt_browser(config: &Config) -> Result<String> {
             "  {}) {:<20} {}",
             index + 1,
             candidate.display,
-            candidate.note
+            scan_state(candidate)
         );
     }
     if !missing.is_empty() {
@@ -345,10 +344,52 @@ fn prompt_browser(config: &Config) -> Result<String> {
         };
         let answer = read_line(&prompt)?;
         match resolve_choice(&answer, &present, default) {
-            Ok(spec) => return Ok(spec),
+            Ok(spec) => {
+                // Reuse the scan result when the pick was scanned; a typed
+                // spec (or a browser with no profile) gets its own check.
+                let scanned = present
+                    .iter()
+                    .find(|candidate| candidate.spec == spec)
+                    .and_then(|candidate| candidate.session.clone());
+                let session = match scanned {
+                    Some(session) => session,
+                    None => check_session(&spec, script).await,
+                };
+                return Ok((spec, session));
+            }
             Err(error) => println!("  {error}"),
         }
     }
+}
+
+/// One scanned browser as shown in the menu: where it was found, plus what
+/// the automatic session scan said about it.
+fn scan_state(candidate: &Found) -> String {
+    if !candidate.has_profile {
+        // The note already explains it ("firefox (no profile yet)").
+        return candidate.note.clone();
+    }
+    let state = match &candidate.session {
+        Some(Session::SignedIn) => "✓ YouTube session found".to_string(),
+        Some(Session::SignedOut(_)) => "✗ no YouTube session".to_string(),
+        Some(Session::Unknown(_)) => "? couldn't read cookies".to_string(),
+        None => String::new(),
+    };
+    format!("{} · {state}", candidate.note)
+}
+
+/// Preselect a browser: the first one the scan found signed in, else the
+/// one already configured, else the first browser found.
+fn default_choice(found: &[Found], current: Option<&str>) -> Option<usize> {
+    if found.is_empty() {
+        return None;
+    }
+    found
+        .iter()
+        .position(|candidate| matches!(candidate.session, Some(Session::SignedIn)))
+        .or_else(|| current.and_then(|current| found.iter().position(|f| f.spec == current)))
+        .map(|index| index + 1)
+        .or(Some(1))
 }
 
 /// Menu input: a displayed number, or a browser spec (validated). Empty
@@ -435,7 +476,9 @@ fn detect(home: &Path, path_var: &str) -> Vec<Found> {
                 spec: candidate.spec,
                 display: candidate.display,
                 found: bin.is_some() || has_profile,
+                has_profile,
                 note,
+                session: None,
             }
         })
         .collect()
@@ -495,13 +538,17 @@ mod tests {
                 spec: "firefox",
                 display: "Firefox",
                 found: true,
+                has_profile: true,
                 note: String::new(),
+                session: None,
             },
             Found {
                 spec: "chrome",
                 display: "Google Chrome",
                 found: true,
+                has_profile: true,
                 note: String::new(),
+                session: None,
             },
         ];
         assert_eq!(resolve_choice("2", &present, None).unwrap(), "chrome");
@@ -519,6 +566,31 @@ mod tests {
         assert!(resolve_choice("9", &present, None).is_err());
         assert!(resolve_choice("", &present, None).is_err());
         assert!(resolve_choice("netscape", &present, None).is_err());
+    }
+
+    #[test]
+    fn default_prefers_signed_in_over_configured() {
+        let scanned = |spec: &'static str, session| Found {
+            spec,
+            display: spec,
+            found: true,
+            has_profile: true,
+            note: String::new(),
+            session,
+        };
+        let signed_out = Session::SignedOut("no session".to_string());
+        let found = vec![
+            scanned("firefox", Some(signed_out.clone())),
+            scanned("chrome", Some(Session::SignedIn)),
+            scanned("opera", None),
+        ];
+        // A signed-in browser beats the configured one, whatever the order.
+        assert_eq!(default_choice(&found, Some("firefox")), Some(2));
+        // Configured browser when nothing scanned signed in…
+        assert_eq!(default_choice(&found[..1], Some("firefox")), Some(1));
+        // …else the first found browser, else no default at all.
+        assert_eq!(default_choice(&found[..2], None), Some(2));
+        assert_eq!(default_choice(&[], None), None);
     }
 
     #[test]

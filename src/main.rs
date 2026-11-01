@@ -68,7 +68,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Configure YouTube sign-in: pick the cookie browser and verify the session.
+    /// Configure YouTube sign-in: scans browsers for sessions, then verifies.
     Setup {
         /// Configure without prompting, e.g. `utui setup --browser firefox`.
         #[arg(long)]

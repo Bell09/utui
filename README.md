@@ -91,7 +91,7 @@ My Feeds, Subscriptions, Watch Later, and Liked videos need YouTube cookies. The
 utui setup
 ```
 
-It detects the browsers yt-dlp can read cookies from, lets you pick the one you sign in to YouTube with, verifies the session twice — an offline cookie-jar check (and if you're signed out, it offers to open the YouTube sign-in page and re-check), then an optional live Watch Later fetch — and writes the result to `~/.config/utui/config.toml`:
+It automatically scans every browser yt-dlp can read cookies from for a signed-in YouTube session, then lets you choose: each detected browser is listed with what the scan found (`✓ YouTube session found`, `✗ no YouTube session`, `? couldn't read cookies`, or `· no profile yet`), and the preselected default is the first browser that's actually signed in (falling back to your configured one, then the first browser found). If you're signed out everywhere, it offers to open the YouTube sign-in page and re-checks once you're done. It verifies the final choice with a live Watch Later fetch and writes the result to `~/.config/utui/config.toml`:
 
 ```toml
 cookies_browser = "firefox"
@@ -104,7 +104,7 @@ Useful variants:
 
 | Command | What it does |
 | --- | --- |
-| `utui setup` | Interactive setup (prompts for a browser, verifies, saves) |
+| `utui setup` | Interactive setup (scans browsers for sessions, lets you choose, verifies, saves) |
 | `utui setup --status` | Show the configured browser, account-sync state, and session check without changing anything |
 | `utui setup --browser chrome` | Configure non-interactively (exits non-zero if verification fails, after saving) |
 | `utui setup --browser firefox --no-probe` | Configure without the live network check |
