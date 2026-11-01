@@ -151,6 +151,30 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
         return;
     }
 
+    // A paged feed wears a one-row banner naming the window — which page is
+    // open and the keys that move it (yt-x's Next/Previous, bound to N/P).
+    let area = if app.feed_page > 1 {
+        let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
+        let banner = Line::from(vec![
+            Span::styled(" page ", Style::default().fg(app.theme.muted)),
+            Span::styled(
+                app.feed_page.to_string(),
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ·  ", Style::default().fg(app.theme.muted)),
+            Span::styled("N", Style::default().fg(app.theme.accent)),
+            Span::styled(" next  ", Style::default().fg(app.theme.muted)),
+            Span::styled("P", Style::default().fg(app.theme.accent)),
+            Span::styled(" previous", Style::default().fg(app.theme.muted)),
+        ]);
+        frame.render_widget(Paragraph::new(banner), rows[0]);
+        rows[1]
+    } else {
+        area
+    };
+
     let show_views = area.width >= 58;
     let mut widths = vec![
         Constraint::Length(2),
@@ -721,6 +745,7 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
                 ("y", "copy"),
                 ("o", "open"),
                 ("R", "refresh"),
+                ("N/P", "next/prev page"),
                 ("b/esc", "back"),
             ],
             &app.theme,
@@ -984,5 +1009,53 @@ mod tests {
         terminal
             .draw(|frame| draw(frame, &mut app, Instant::now()))
             .unwrap();
+    }
+
+    #[test]
+    fn paged_feed_shows_page_banner() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = app();
+        app.view = View::Browse;
+        app.feed = Feed {
+            title: "Search · rust".into(),
+            source: "https://example.com".into(),
+            kind: FeedKind::Search,
+            subtitle: "SEARCH  ·  50 RESULTS  ·  PAGE 2".into(),
+            items: (0..5)
+                .map(|i| Video {
+                    id: format!("v{i}"),
+                    title: format!("Video {i}"),
+                    ..Video::default()
+                })
+                .collect(),
+            notice: None,
+            auth: false,
+            fetched_at: 0,
+        };
+        app.feed_page = 2;
+        app.table_state.select(Some(0));
+
+        terminal
+            .draw(|frame| draw(frame, &mut app, Instant::now()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let all: String = (0..buffer.area.height)
+            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+            .map(|(x, y)| buffer[(x, y)].symbol())
+            .collect();
+        assert!(all.contains("N next"), "banner missing: {all}");
+
+        // Page one carries no banner.
+        app.feed_page = 1;
+        terminal
+            .draw(|frame| draw(frame, &mut app, Instant::now()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let all: String = (0..buffer.area.height)
+            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+            .map(|(x, y)| buffer[(x, y)].symbol())
+            .collect();
+        assert!(!all.contains("N next"), "page 1 must not banner: {all}");
     }
 }

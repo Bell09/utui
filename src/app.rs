@@ -496,6 +496,12 @@ pub struct App {
     theme_poll_at: Instant,
     /// Signed-in account name, fetched in the background for the header.
     pub account_name: Option<String>,
+    /// 1-based page window into the current feed (yt-x style paging: each
+    /// page re-queries the same list with a shifted --playlist-start window).
+    pub feed_page: usize,
+    /// Set when the last fetch came back short of a full page — there is
+    /// nothing beyond `feed_page`.
+    pub feed_last_page: bool,
 }
 
 impl App {
@@ -541,6 +547,8 @@ impl App {
             theme_mtime,
             theme_poll_at: Instant::now(),
             account_name: None,
+            feed_page: 1,
+            feed_last_page: false,
         };
         app.restore_last_feed();
         app
@@ -891,6 +899,8 @@ impl App {
         view: View,
     ) {
         if requires_auth && self.config.cookies_browser.is_none() {
+            self.feed_page = 1;
+            self.feed_last_page = false;
             self.feed = Feed {
                 title,
                 source: url,
@@ -922,6 +932,10 @@ impl App {
         self.fetch_id = self.fetch_id.wrapping_add(1);
         let id = self.fetch_id;
         self.loading = true;
+        // Every navigation starts on the first page; paging and refresh keep
+        // the page they are on through `refetch_page`.
+        self.feed_page = 1;
+        self.feed_last_page = false;
         self.loading_label = match kind {
             FeedKind::Search => "Searching YouTube".to_string(),
             FeedKind::Channel => "Loading channel".to_string(),
@@ -1042,6 +1056,10 @@ impl App {
             KeyCode::Char('d') => self.open_quality(),
             KeyCode::Char('D') => self.download_selected(true, None),
             KeyCode::Char('R') => self.refresh(),
+
+            // Paging through long lists, yt-x style: N next page, P previous.
+            KeyCode::Char('N') => self.page_feed(true),
+            KeyCode::Char('P') => self.page_feed(false),
             KeyCode::Char('c') => self.open_selected_channel(),
             KeyCode::Char('y') => self.copy_selected_url(),
             KeyCode::Char('o') => self.open_selected_browser(),
@@ -1444,6 +1462,82 @@ impl App {
         self.table_state.select(Some(selected));
     }
 
+    /// Re-query the current feed at a given page window without touching the
+    /// back stack — the yt-x "Next/Previous" model: same list, shifted
+    /// `--playlist-start/--playlist-end` window.
+    fn refetch_page(&mut self, page: usize, bypass_cache: bool) {
+        let url = self.feed.source.clone();
+        let title = self.feed.title.clone();
+        let subtitle = self.feed.subtitle.clone();
+        let kind = self.feed.kind;
+        let auth = self.feed.auth;
+
+        self.fetch_id = self.fetch_id.wrapping_add(1);
+        let id = self.fetch_id;
+        self.loading = true;
+        self.loading_label = if page > 1 {
+            format!("Loading page {page}")
+        } else {
+            match kind {
+                FeedKind::Search => "Searching YouTube".to_string(),
+                FeedKind::Channel => "Loading channel".to_string(),
+                FeedKind::Playlist => "Loading playlist".to_string(),
+                _ => "Fetching with yt-dlp".to_string(),
+            }
+        };
+        self.feed_page = page;
+        self.feed_last_page = false;
+        self.feed = Feed {
+            title,
+            source: url.clone(),
+            kind,
+            subtitle,
+            items: Vec::new(),
+            notice: None,
+            auth,
+            fetched_at: 0,
+        };
+        self.overlay = None;
+        self.reset_selection();
+
+        let mut spec = FetchSpec::new(id, url, self.feed.title.clone());
+        spec.limit = self.config.results;
+        spec.page = page;
+        spec.cookies_browser = self.config.cookies_browser.clone();
+        spec.requires_auth = auth;
+        spec.cache_dir = Some(self.paths.feed_cache_dir());
+        spec.bypass_cache = bypass_cache;
+        self.pending_fetch = Some(spec);
+    }
+
+    /// Move one page through the current remote list: `N` forward, `P` back —
+    /// the keyboard twin of yt-x's Next/Previous menu entries. Local lists
+    /// (Saved, History) hold everything at once and never page.
+    pub fn page_feed(&mut self, forward: bool) {
+        if self.loading || self.feed.source.is_empty() {
+            return;
+        }
+        if matches!(self.feed.kind, FeedKind::Saved | FeedKind::History) {
+            self.toast_info("This list holds all its items — no pages");
+            return;
+        }
+        if self.feed.auth && self.config.cookies_browser.is_none() {
+            return;
+        }
+        if forward && self.feed_last_page {
+            self.toast_info("Last page");
+            return;
+        }
+        let page = if forward {
+            self.feed_page + 1
+        } else if self.feed_page > 1 {
+            self.feed_page - 1
+        } else {
+            return;
+        };
+        self.refetch_page(page, false);
+    }
+
     fn refresh(&mut self) {
         match self.feed.kind {
             FeedKind::Saved => {
@@ -1458,12 +1552,8 @@ impl App {
                 if self.feed.source.is_empty() {
                     return;
                 }
-                let url = self.feed.source.clone();
-                let title = self.feed.title.clone();
-                let subtitle = self.feed.subtitle.clone();
-                let kind = self.feed.kind;
-                let auth = self.feed.auth;
-                self.request_feed(url, title, subtitle, kind, auth, false, true, self.view);
+                // Refresh keeps the page you are on.
+                self.refetch_page(self.feed_page, true);
             }
         }
     }
@@ -1505,15 +1595,31 @@ impl App {
                             data.title.clone()
                         };
                         self.feed.subtitle = format!(
-                            "{}  ·  {} RESULTS",
+                            "{}  ·  {} RESULTS{}",
                             self.feed.kind.label(),
-                            data.items.len()
+                            data.items.len(),
+                            if self.feed_page > 1 {
+                                format!("  ·  PAGE {}", self.feed_page)
+                            } else {
+                                String::new()
+                            }
                         );
+                        // A short page means the list ends here: `N` stops
+                        // offering another one.
+                        self.feed_last_page =
+                            self.feed_page > 1 && data.items.len() < self.config.results;
                         self.feed.notice = if data.items.is_empty() {
-                            Some(
-                                "No items returned. Try a different query or refresh with `r`."
-                                    .to_string(),
-                            )
+                            if self.feed_page > 1 {
+                                Some(format!(
+                                    "Page {} is empty — press `P` for the previous page.",
+                                    self.feed_page
+                                ))
+                            } else {
+                                Some(
+                                    "No items returned. Try a different query or refresh with `r`."
+                                        .to_string(),
+                                )
+                            }
                         } else {
                             None
                         };
@@ -1838,5 +1944,132 @@ mod tests {
         };
         input.handle_key(&KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
         assert_eq!(input.value, "rust ");
+    }
+
+    fn app() -> App {
+        let root = std::env::temp_dir().join(format!("utui-app-test-{}", std::process::id()));
+        App::new(
+            crate::config::Paths {
+                config_dir: root.join("config"),
+                data_dir: root.join("data"),
+                cache_dir: root.join("cache"),
+            },
+            crate::config::Config::default(),
+            crate::store::Store::default(),
+        )
+    }
+
+    fn watch_later_feed() -> Feed {
+        Feed {
+            title: "Watch later videos".into(),
+            source: "https://www.youtube.com/playlist?list=WL".into(),
+            kind: FeedKind::Playlist,
+            subtitle: "WATCH LATER  ·  50 RESULTS".into(),
+            items: Vec::new(),
+            notice: None,
+            auth: true,
+            fetched_at: 0,
+        }
+    }
+
+    fn videos(count: usize) -> Vec<Video> {
+        (0..count)
+            .map(|i| Video {
+                id: format!("v{i}"),
+                title: format!("Video {i}"),
+                ..Video::default()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn paging_walks_windows_like_yt_x() {
+        let mut app = app();
+        app.config.cookies_browser = Some("firefox".into());
+        app.feed = watch_later_feed();
+
+        // N queues the next window without pushing the back stack.
+        app.page_feed(true);
+        assert_eq!(app.feed_page, 2);
+        let spec = app.pending_fetch.take().expect("page-2 fetch queued");
+        assert_eq!(spec.page, 2);
+        assert_eq!(spec.limit, 50);
+        assert!(!spec.bypass_cache);
+        assert!(app.stack.is_empty(), "paging must not push history");
+
+        // A full page lands: the marker shows and the next one is offered.
+        app.fetch_id = spec.id;
+        app.handle_msg(Msg::Feed {
+            id: spec.id,
+            result: Ok(FeedData {
+                title: "Watch later videos".into(),
+                source: "https://www.youtube.com/playlist?list=WL".into(),
+                items: videos(50),
+                fetched_at: 0,
+            }),
+        });
+        assert_eq!(app.feed_page, 2);
+        assert!(!app.feed_last_page, "a full page is not the last");
+        assert!(
+            app.feed.subtitle.contains("PAGE 2"),
+            "{}",
+            app.feed.subtitle
+        );
+        assert_eq!(app.feed.items.len(), 50);
+
+        // A short page means the end: N queues nothing more.
+        app.page_feed(true);
+        let spec = app.pending_fetch.take().expect("page-3 fetch queued");
+        app.fetch_id = spec.id;
+        app.handle_msg(Msg::Feed {
+            id: spec.id,
+            result: Ok(FeedData {
+                title: "Watch later videos".into(),
+                source: "https://www.youtube.com/playlist?list=WL".into(),
+                items: videos(12),
+                fetched_at: 0,
+            }),
+        });
+        assert!(app.feed_last_page);
+        app.page_feed(true);
+        assert!(app.pending_fetch.is_none(), "no fetch past the last page");
+        assert_eq!(app.feed_page, 3);
+
+        // P walks back one window at a time.
+        app.page_feed(false);
+        assert_eq!(app.feed_page, 2);
+        let spec = app.pending_fetch.take().expect("back-page fetch queued");
+        assert_eq!(spec.page, 2);
+    }
+
+    #[test]
+    fn local_lists_and_first_page_never_page() {
+        let mut app = app();
+        app.feed = Feed {
+            title: "Saved videos".into(),
+            source: "local:saved".into(),
+            kind: FeedKind::Saved,
+            subtitle: "SAVED  ·  3 RESULTS".into(),
+            items: videos(3),
+            notice: None,
+            auth: false,
+            fetched_at: 0,
+        };
+        app.page_feed(true);
+        assert_eq!(app.feed_page, 1, "Saved holds everything at once");
+        assert!(app.pending_fetch.is_none());
+
+        // P on the first page is a no-op too.
+        app.feed = watch_later_feed();
+        app.page_feed(false);
+        assert_eq!(app.feed_page, 1);
+        assert!(app.pending_fetch.is_none());
+
+        // Refresh keeps the page it was asked on.
+        app.feed_page = 3;
+        app.refresh();
+        let spec = app.pending_fetch.take().expect("refresh queues a fetch");
+        assert_eq!(spec.page, 3);
+        assert!(spec.bypass_cache);
     }
 }

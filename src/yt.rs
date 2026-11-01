@@ -69,6 +69,9 @@ pub struct FetchSpec {
     pub url: String,
     pub label: String,
     pub limit: usize,
+    /// 1-based page window into the list, exactly like yt-x: page N fetches
+    /// items `(N-1)*limit+1 ..= N*limit` via `--playlist-start/--playlist-end`.
+    pub page: usize,
     pub cookies_browser: Option<String>,
     pub requires_auth: bool,
     pub cache_dir: Option<PathBuf>,
@@ -83,6 +86,7 @@ impl FetchSpec {
             url: url.into(),
             label: label.into(),
             limit: 50,
+            page: 1,
             cookies_browser: None,
             requires_auth: false,
             cache_dir: None,
@@ -90,6 +94,14 @@ impl FetchSpec {
             bypass_cache: false,
         }
     }
+}
+
+/// The 1-based item window a page covers: page 1 starts at 1, every later
+/// page continues where the previous one ended.
+fn playlist_window(page: usize, limit: usize) -> (usize, usize) {
+    let limit = limit.max(1);
+    let start = (page.max(1) - 1) * limit + 1;
+    (start, start + limit - 1)
 }
 
 #[derive(Debug, Clone)]
@@ -202,9 +214,17 @@ async fn fetch_uncached(spec: &FetchSpec) -> Result<FeedData> {
         .arg("--retries")
         .arg("1")
         .arg("--extractor-retries")
-        .arg("1")
-        .arg("--playlist-end")
-        .arg(spec.limit.max(1).to_string());
+        .arg("1");
+
+    if spec.page > 1 {
+        let (start, end) = playlist_window(spec.page, spec.limit);
+        command.arg("--playlist-start").arg(start.to_string());
+        command.arg("--playlist-end").arg(end.to_string());
+    } else {
+        command
+            .arg("--playlist-end")
+            .arg(spec.limit.max(1).to_string());
+    }
 
     if let Some(browser) = &spec.cookies_browser {
         command.arg("--cookies-from-browser").arg(browser);
@@ -212,9 +232,13 @@ async fn fetch_uncached(spec: &FetchSpec) -> Result<FeedData> {
 
     command.arg("--").arg(&spec.url).kill_on_drop(true);
 
-    let output = tokio::time::timeout(Duration::from_secs(75), command.output())
+    // Paged fetches walk more continuation chunks before their window opens
+    // (--playlist-start 151 must extract 150 entries first), so they get
+    // twice the runway before the spinner gives up.
+    let timeout_secs = if spec.page > 1 { 150 } else { 75 };
+    let output = tokio::time::timeout(Duration::from_secs(timeout_secs), command.output())
         .await
-        .map_err(|_| anyhow::anyhow!("yt-dlp timed out after 75 seconds"))?
+        .map_err(|_| anyhow::anyhow!("yt-dlp timed out after {timeout_secs} seconds"))?
         .context("could not run yt-dlp (is it installed and on PATH?)")?;
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -498,9 +522,10 @@ fn last_error_line(stderr: &str) -> Option<String> {
 fn cache_path(spec: &FetchSpec) -> Option<PathBuf> {
     let cache_dir = spec.cache_dir.as_ref()?;
     let key = format!(
-        "{}|{}|{}|v3",
+        "{}|{}|{}|{}|v3",
         spec.url,
         spec.limit,
+        spec.page,
         spec.cookies_browser.as_deref().unwrap_or("")
     );
     Some(
@@ -643,5 +668,27 @@ mod tests {
             items[0].channel_url.as_deref(),
             Some("https://www.youtube.com/channel/UCROOT")
         );
+    }
+
+    #[test]
+    fn page_windows_are_contiguous_yt_x_style() {
+        assert_eq!(playlist_window(1, 30), (1, 30));
+        assert_eq!(playlist_window(2, 30), (31, 60));
+        assert_eq!(playlist_window(3, 30), (61, 90));
+        // A degenerate limit never yields an inverted window.
+        assert_eq!(playlist_window(2, 0), (2, 2));
+    }
+
+    #[test]
+    fn cache_key_differs_per_page() {
+        let mut spec = FetchSpec::new(1, "https://www.youtube.com/playlist?list=WL", "Watch Later");
+        spec.limit = 30;
+        spec.cache_dir = Some(std::path::PathBuf::from("/tmp/utui-cache-test"));
+        let page1 = cache_path(&spec);
+        spec.page = 2;
+        let page2 = cache_path(&spec);
+        assert_ne!(page1, page2, "pages must not share a cache file");
+        spec.page = 1;
+        assert_eq!(page1, cache_path(&spec), "page 1 key is stable");
     }
 }

@@ -167,6 +167,7 @@ Home and Browse share one key map: navigation and playback follow the usual play
 | `y` | Copy the video URL |
 | `o` | Open in browser |
 | `R` | Refresh the current feed (bypasses cache) |
+| `N` / `P` | Next / previous page of the list — yt-x style windowed paging on My Feeds, Watch Later, Liked, channels, playlists, and search (pages of `results` from the config; a `page n · N next · P previous` banner names the window) |
 | `b` / `Esc` | Back (with a stacked feed; `Esc` also cancels a running fetch) |
 
 ### Home
