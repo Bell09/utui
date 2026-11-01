@@ -47,6 +47,7 @@ Make sure `~/.local/bin` is on your `PATH`.
 
 ```bash
 utui                     # start on the home screen
+utui setup               # configure YouTube sign-in (interactive)
 utui --search "rust"     # open search results immediately
 utui --url "https://www.youtube.com/playlist?list=..."  # open a URL
 ```
@@ -84,18 +85,32 @@ While a download is running, progress appears in the status bar. Downloads never
 
 ## Cookie-backed feeds
 
-My Feeds, Subscriptions, Watch Later, and Liked videos need YouTube cookies.
+My Feeds, Subscriptions, Watch Later, and Liked videos need YouTube cookies. The setup wizard walks through all of it:
 
-1. Set your browser in `~/.config/utui/config.toml`:
+```bash
+utui setup
+```
 
-   ```toml
-   cookies_browser = "firefox"
-   ```
+It detects the browsers yt-dlp can read cookies from, lets you pick the one you sign in to YouTube with, verifies the session twice — an offline cookie-jar check (and if you're signed out, it offers to open the YouTube sign-in page and re-check), then an optional live Watch Later fetch — and writes the result to `~/.config/utui/config.toml`:
 
-   Supported values are whatever `yt-dlp --cookies-from-browser` accepts, for example `firefox`, `chrome`, `chromium`, `brave`, `edge`, `opera`, `safari`, or `vivaldi`.
+```toml
+cookies_browser = "firefox"
+account_sync = true
+```
 
-2. Make sure that browser is signed in to YouTube.
-3. Restart Utui (or restart your terminal session so the palette reloads).
+Supported values are whatever `yt-dlp --cookies-from-browser` accepts: `firefox`, `chrome`, `chromium`, `brave`, `edge`, `opera`, `safari`, `vivaldi`, or `whale`, optionally with a profile (`firefox::/path/to/profile`).
+
+Useful variants:
+
+| Command | What it does |
+| --- | --- |
+| `utui setup` | Interactive setup (prompts for a browser, verifies, saves) |
+| `utui setup --status` | Show the configured browser, account-sync state, and session check without changing anything |
+| `utui setup --browser chrome` | Configure non-interactively (exits non-zero if verification fails, after saving) |
+| `utui setup --browser firefox --no-probe` | Configure without the live network check |
+| `utui setup --browser chrome --account-sync false` | Configure and turn account sync off |
+
+You can also set the value by hand in `config.toml` — run `utui setup --status` afterwards to verify it. Restart Utui for changes to apply.
 
 Cookies are used only by `yt-dlp` and its cookie machinery (also by the account-sync helper, which is a standalone `yt-dlp`-based process). Utui never reads or stores browser cookies itself.
 
@@ -219,7 +234,7 @@ No file, no palette → your terminal's own defaults. `WAL_COLORS_FILE` override
 
 ## Account sync (real likes and Watch Later)
 
-With `cookies_browser` set and `account_sync = true`, the `l` and `w` keys (uppercase `L` / `W` also work) act on your actual YouTube account, not just a local list:
+With `cookies_browser` set and `account_sync = true` — both written by `utui setup` — the `l` and `w` keys (uppercase `L` / `W` also work) act on your actual YouTube account, not just a local list:
 
 - `l` likes the video; `l` again unlikes it.
 - `w` adds the video to Watch Later; `w` again removes it.

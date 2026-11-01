@@ -1,5 +1,6 @@
 mod app;
 mod config;
+mod setup;
 mod store;
 mod sync;
 mod theme;
@@ -10,7 +11,7 @@ mod yt;
 
 use anyhow::{bail, Context, Result};
 use app::{App, Effect, Msg};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use config::Config;
 use crossterm::event::{self, Event};
 use serde::Serialize;
@@ -29,7 +30,8 @@ use tokio::task::JoinHandle;
     version,
     about = "A blazing-fast terminal YouTube browser",
     long_about = "Browse YouTube and anything yt-dlp supports from a native Rust TUI.\n\
-                  Playback uses mpv, downloads use yt-dlp, and cookie-backed feeds are opt-in."
+                  Playback uses mpv, downloads use yt-dlp, and cookie-backed feeds are opt-in.\n\
+                  Run `utui setup` to configure YouTube sign-in."
 )]
 struct Cli {
     /// Search YouTube and open the results in the TUI.
@@ -59,6 +61,32 @@ struct Cli {
     /// Clear the feed cache before starting.
     #[arg(long)]
     clear_cache: bool,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Configure YouTube sign-in: pick the cookie browser and verify the session.
+    Setup {
+        /// Configure without prompting, e.g. `utui setup --browser firefox`.
+        #[arg(long)]
+        browser: Option<String>,
+
+        /// Print the current sign-in status and exit.
+        #[arg(long, conflicts_with_all = ["browser", "account_sync"])]
+        status: bool,
+
+        /// Skip the live Watch Later verification fetch.
+        #[arg(long)]
+        no_probe: bool,
+
+        /// Turn account sync on or off (default: keep the current value,
+        /// or ask when running interactively).
+        #[arg(long, value_name = "BOOL")]
+        account_sync: Option<bool>,
+    },
 }
 
 #[tokio::main]
@@ -73,6 +101,24 @@ async fn main() -> Result<()> {
     }
     if let Some(limit) = cli.limit {
         config.results = limit.clamp(1, 500);
+    }
+
+    // `utui setup` configures sign-in in place: no TUI, no feed, and it
+    // takes precedence over the launching flags above.
+    if let Some(Commands::Setup {
+        browser,
+        status,
+        no_probe,
+        account_sync,
+    }) = &cli.command
+    {
+        let options = setup::Options {
+            browser: browser.clone(),
+            status: *status,
+            no_probe: *no_probe,
+            account_sync: *account_sync,
+        };
+        return setup::run(&paths, config, options).await;
     }
 
     if cli.clear_cache {
