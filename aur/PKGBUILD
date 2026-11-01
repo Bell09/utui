@@ -1,0 +1,50 @@
+# Maintainer: castillo <castillo@users.noreply.github.com>
+#
+# Publish steps (once per release):
+#   1. On GitHub: tag the release `v<pkgver>` (e.g. v0.1.0) and push the tag.
+#   2. Replace sha256sums SKIP with the real hash of the release tarball:
+#        curl -sL https://github.com/castillo/utui/archive/refs/tags/v<pkgver>.tar.gz | sha256sum
+#   3. git clone https://aur.archlinux.org/utui.git
+#   4. Copy PKGBUILD into the clone, then regenerate .SRCINFO:
+#        makepkg --printsrcinfo > .SRCINFO
+#   5. git add PKGBUILD .SRCINFO && git commit -s && git push
+# Users then install with `paru -S utui`, `yay -S utui`, or a manual
+# `git clone https://aur.archlinux.org/utui.git && cd utui && makepkg -si`.
+
+pkgname=utui
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="A blazing-fast terminal YouTube browser built in Rust"
+arch=('x86_64')
+url="https://github.com/castillo/utui"
+license=('MIT')
+depends=('yt-dlp' 'mpv')
+optdepends=(
+  'ffmpeg: merge video/audio streams and create MP3s'
+  'wl-clipboard: copy URLs on Wayland'
+  'xclip: copy URLs on X11'
+  'xsel: copy URLs on X11'
+)
+makedepends=('cargo')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  export RUSTUP_TOOLCHAIN=stable
+  cd "$pkgname-$pkgver"
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cd "$pkgname-$pkgver"
+  cargo build --frozen --release --all-features
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

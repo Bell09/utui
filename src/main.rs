@@ -201,6 +201,18 @@ async fn run_tui(app: &mut App) -> Result<()> {
     let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
     let mut terminal = ratatui::init();
     app.set_picker(thumb::picker());
+    // Fetch the signed-in account name in the background for the header.
+    if let Some(browser) = app.config.cookies_browser.clone() {
+        let script = app.paths.cache_dir.join("sync.py");
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            if sync::prepare_script(&script).is_err() {
+                return;
+            }
+            let name = sync::account_name(&browser, &script).await;
+            let _ = tx.send(Msg::AccountName(name));
+        });
+    }
     let mut active_fetch: Option<JoinHandle<()>> = None;
     let mut active_thumb: Option<JoinHandle<()>> = None;
     let mut active_sync: Option<JoinHandle<()>> = None;
@@ -302,6 +314,7 @@ async fn run_tui(app: &mut App) -> Result<()> {
                 }
             }
 
+            app.poll_theme();
             app.sync_thumbnail();
             if let Some(spec) = app.take_thumbnail() {
                 if let Some(handle) = active_thumb.take() {

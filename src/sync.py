@@ -11,6 +11,7 @@ Supported actions:
   sync.py <browser-spec> like <video-id> on|off
   sync.py <browser-spec> watchlater <video-id> add|remove
   sync.py <browser-spec> check
+  sync.py <browser-spec> account
 
 `browser-spec` accepts whatever `yt-dlp --cookies-from-browser` accepts,
 e.g. "firefox", "chrome", "firefox::/path/to/profile", "brave:yand2fz:".
@@ -26,7 +27,8 @@ CLIENT_FALLBACK = {"key": "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8", "version": 
 
 USAGE = (
     "usage: sync.py <browser> like <id> on|off | "
-    "sync.py <browser> watchlater <id> add|remove | sync.py <browser> check"
+    "sync.py <browser> watchlater <id> add|remove | "
+    "sync.py <browser> check | sync.py <browser> account"
 )
 
 
@@ -96,6 +98,32 @@ def innertube(ydl, path, body):
     return json.loads(text or "{}")
 
 
+def find_account_name(value):
+    """Recursive search for the signed-in account's display name.
+
+    account_menu nests it in a few shapes across client versions: a plain
+    string, or a `runs` list. Mirror ytmtui and take the first hit.
+    """
+    if isinstance(value, dict):
+        name = value.get("accountName")
+        if isinstance(name, str) and name:
+            return name
+        if isinstance(name, dict):
+            runs = name.get("runs") or []
+            if runs and isinstance(runs[0].get("text"), str):
+                return runs[0]["text"]
+        for child in value.values():
+            found = find_account_name(child)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = find_account_name(child)
+            if found:
+                return found
+    return None
+
+
 def main(argv):
     if len(argv) < 2:
         emit(False, error=USAGE)
@@ -120,6 +148,16 @@ def main(argv):
 
     if mode == "check":
         emit(True, signed_in=True)
+
+    if mode == "account":
+        try:
+            data = innertube(ydl, "account/account_menu", {})
+        except Exception as error:
+            emit(False, error=str(error) or type(error).__name__)
+        name = find_account_name(data)
+        if name:
+            emit(True, account=name)
+        emit(False, error="no account name in the account_menu response")
 
     if len(argv) < 4:
         emit(False, error=USAGE)

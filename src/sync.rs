@@ -133,6 +133,27 @@ async fn invoke(script: &Path, args: &[String]) -> Result<(String, String)> {
     ))
 }
 
+/// The signed-in account's display name for the header, or `None` when it
+/// cannot be read (signed out, offline, unreadable jar). Never fails the
+/// caller: the name is decoration, the app works without it.
+pub async fn account_name(browser: &str, script: &Path) -> Option<String> {
+    let (stdout, _) = invoke(script, &[browser.to_string(), "account".to_string()])
+        .await
+        .ok()?;
+    parse_account(&stdout)
+}
+
+/// Extract the account name from one helper `account` result line.
+fn parse_account(stdout: &str) -> Option<String> {
+    let value: serde_json::Value = stdout
+        .lines()
+        .rev()
+        .find_map(|line| serde_json::from_str(line).ok())?;
+    (value.get("ok").and_then(serde_json::Value::as_bool) == Some(true))
+        .then(|| value.get("account").and_then(serde_json::Value::as_str))?
+        .map(str::to_string)
+}
+
 /// Run one sync action and return the helper's success summary.
 pub async fn run(action: &SyncAction, browser: &str, script: &Path) -> Result<String> {
     let (stdout, stderr) = invoke(script, &action.argv(browser)).await?;
@@ -203,5 +224,19 @@ mod tests {
             silent,
             Session::Unknown("the cookie helper printed no result".to_string())
         );
+    }
+
+    #[test]
+    fn account_result_parses_name_only_when_ok() {
+        assert_eq!(
+            parse_account(r#"{"ok":true,"account":"Qu!m Ashley Cast!ll0"}"#),
+            Some("Qu!m Ashley Cast!ll0".to_string())
+        );
+        assert_eq!(
+            parse_account(r#"{"ok":false,"error":"not signed in"}"#),
+            None
+        );
+        assert_eq!(parse_account("{\"ok\":true}"), None);
+        assert_eq!(parse_account(""), None);
     }
 }

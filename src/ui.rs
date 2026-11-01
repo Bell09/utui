@@ -1,7 +1,7 @@
 use crate::app::{
     visible_home_items, Action, App, HomeItem, Overlay, ThumbnailState, ToastKind, View, QUALITIES,
 };
-use crate::theme::*;
+use crate::theme::Theme;
 use crate::util::{format_date, format_duration, format_views, relative_time, truncate};
 use crate::yt::{self, Video};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -23,6 +23,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
     // No background paint: the terminal's own surface (transparency,
     // blur, wallpaper) shows through everywhere.
     let layout = Layout::vertical([
+        Constraint::Length(1),                                          // header
         Constraint::Length(1),                                          // search prompt
         Constraint::Length(1),                                          // decorative rule
         Constraint::Length(if app.view == View::Home { 1 } else { 0 }), // feed bar
@@ -31,17 +32,44 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
     ])
     .split(area);
 
-    draw_search(frame, layout[0], app);
-    draw_rule(frame, layout[1]);
+    draw_header(frame, layout[0], app);
+    draw_search(frame, layout[1], app);
+    draw_rule(frame, layout[2], &app.theme);
     match app.view {
-        View::Home => draw_home(frame, layout[3], app, now),
-        View::Browse => draw_browse(frame, layout[3], app, now),
+        View::Home => draw_home(frame, layout[4], app, now),
+        View::Browse => draw_browse(frame, layout[4], app, now),
     }
-    draw_status(frame, layout[4], app, now);
+    draw_status(frame, layout[5], app, now);
 
     if let Some(overlay) = &app.overlay {
         draw_overlay(frame, area, app, overlay);
     }
+}
+
+/// The header line above the search input (ytmtui style): the app name, and
+/// — when the cookie jar carries a signed-in YouTube session — the account
+/// name trailing it. Purely informational; no background is ever painted.
+fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let mut spans = vec![Span::styled(
+        " UTUI",
+        Style::default()
+            .fg(app.theme.brand)
+            .add_modifier(Modifier::BOLD),
+    )];
+    if let Some(name) = &app.account_name {
+        spans.push(Span::styled(" ⟢ ", Style::default().fg(app.theme.muted)));
+        // " UTUI ⟢ " reserves eight columns; keep a small margin so the
+        // name never sits flush against the terminal edge.
+        let budget = usize::from(area.width).saturating_sub(9).max(1);
+        spans.push(Span::styled(
+            truncate(name, budget),
+            Style::default().fg(app.theme.accent2),
+        ));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn draw_home(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
@@ -66,18 +94,25 @@ fn draw_home_menu(frame: &mut Frame, area: Rect, app: &mut App) {
     let mut spans: Vec<Span<'static>> = Vec::new();
     for (index, item) in items.iter().enumerate() {
         if index > 0 {
-            spans.push(Span::styled(separator, Style::default().fg(*MUTED)));
+            spans.push(Span::styled(
+                separator,
+                Style::default().fg(app.theme.muted),
+            ));
         }
         let selected = index == app.home_index;
         let key_style = if selected {
-            Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(*MUTED)
+            Style::default().fg(app.theme.muted)
         };
         let title_style = if selected {
-            Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(*TEXT)
+            Style::default().fg(app.theme.text)
         };
         // The bar shows the digit that jumps to each feed — w/l became
         // toggles, so the letters no longer all work as shortcuts. The
@@ -129,13 +164,13 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
     let header = Row::new({
         let mut cells = vec![
             Cell::from(""),
-            Cell::from(Span::styled("title", Style::default().fg(*MUTED))),
-            Cell::from(Span::styled("len", Style::default().fg(*MUTED))),
+            Cell::from(Span::styled("title", Style::default().fg(app.theme.muted))),
+            Cell::from(Span::styled("len", Style::default().fg(app.theme.muted))),
         ];
         if show_views {
             cells.push(Cell::from(Span::styled(
                 "views",
-                Style::default().fg(*MUTED),
+                Style::default().fg(app.theme.muted),
             )));
         }
         cells
@@ -153,36 +188,36 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
         .map(|(index, video)| {
             let mut title_spans = vec![Span::styled(
                 truncate(&video.title, title_width.max(8)),
-                Style::default().fg(*TEXT),
+                Style::default().fg(app.theme.text),
             )];
             if video.is_live() {
-                title_spans.push(Span::styled(" live", Style::default().fg(*ERROR)));
+                title_spans.push(Span::styled(" live", Style::default().fg(app.theme.error)));
             }
             if app.store.is_liked(&video.id) {
-                title_spans.push(Span::styled(" ♥", Style::default().fg(*ERROR)));
+                title_spans.push(Span::styled(" ♥", Style::default().fg(app.theme.error)));
             }
             if app.store.is_watch_later(&video.id) {
-                title_spans.push(Span::styled(" »", Style::default().fg(*WARN)));
+                title_spans.push(Span::styled(" »", Style::default().fg(app.theme.warn)));
             }
             if app.store.is_saved(&video.id) {
-                title_spans.push(Span::styled(" ·", Style::default().fg(*ACCENT)));
+                title_spans.push(Span::styled(" ·", Style::default().fg(app.theme.accent)));
             }
 
             let mut cells = vec![
                 Cell::from(Span::styled(
                     format!("{:>2}", index + 1),
-                    Style::default().fg(*MUTED),
+                    Style::default().fg(app.theme.muted),
                 )),
                 Cell::from(Line::from(title_spans)),
                 Cell::from(Span::styled(
                     format_duration(video.duration),
-                    Style::default().fg(*MUTED),
+                    Style::default().fg(app.theme.muted),
                 )),
             ];
             if show_views {
                 cells.push(Cell::from(Span::styled(
                     format_views(video.view_count),
-                    Style::default().fg(*MUTED),
+                    Style::default().fg(app.theme.muted),
                 )));
             }
             Row::new(cells)
@@ -207,7 +242,7 @@ fn draw_empty(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     };
     let lines = vec![Line::from(Span::styled(
         truncate(&message, area.width.saturating_sub(4) as usize),
-        Style::default().fg(*MUTED),
+        Style::default().fg(app.theme.muted),
     ))];
     let chunks = Layout::vertical([
         Constraint::Fill(1),
@@ -255,25 +290,33 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
     if video.is_live() {
         lines.push(Line::from(Span::styled(
             "live",
-            Style::default().fg(*ERROR).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(app.theme.error)
+                .add_modifier(Modifier::BOLD),
         )));
     }
     if app.store.is_liked(&video.id) {
         lines.push(Line::from(Span::styled(
             "liked",
-            Style::default().fg(*ERROR).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(app.theme.error)
+                .add_modifier(Modifier::BOLD),
         )));
     }
     if app.store.is_watch_later(&video.id) {
         lines.push(Line::from(Span::styled(
             "watch later",
-            Style::default().fg(*WARN).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(app.theme.warn)
+                .add_modifier(Modifier::BOLD),
         )));
     }
     if app.store.is_saved(&video.id) {
         lines.push(Line::from(Span::styled(
             "saved",
-            Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
         )));
     }
     if !lines.is_empty() {
@@ -287,7 +330,7 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         video.channel.clone(),
-        Style::default().fg(*MUTED),
+        Style::default().fg(app.theme.muted),
     )));
     lines.push(Line::from(Span::styled(
         format!(
@@ -296,28 +339,28 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
             format_views(video.view_count),
             relative_time(video.timestamp)
         ),
-        Style::default().fg(*MUTED),
+        Style::default().fg(app.theme.muted),
     )));
     lines.push(Line::from(Span::styled(
         video
             .upload_date
             .clone()
             .unwrap_or_else(|| format_date(video.timestamp)),
-        Style::default().fg(*MUTED),
+        Style::default().fg(app.theme.muted),
     )));
 
     if let Some(description) = &video.description {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             truncate(description, 360),
-            Style::default().fg(*MUTED),
+            Style::default().fg(app.theme.muted),
         )));
     }
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         truncate(&video.url, inner.width.saturating_sub(2) as usize),
-        Style::default().fg(*MUTED),
+        Style::default().fg(app.theme.muted),
     )));
 
     frame.render_widget(
@@ -369,10 +412,10 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     // thin the guide instead so the message never drops below a few
     // columns (the same budgeting ytmtui's footer does).
     let separator = if area.width >= 128 { "  " } else { " " };
-    let (mut guide, mut guide_w) = guide_line(&hints, separator);
+    let (mut guide, mut guide_w) = guide_line(&hints, separator, &app.theme);
     let budget = usize::from(area.width).saturating_sub(guide_w + 1);
     if budget < 8 && hints.len() > 6 {
-        let (thinned, thinned_w) = guide_line(&hints[..6], separator);
+        let (thinned, thinned_w) = guide_line(&hints[..6], separator, &app.theme);
         if usize::from(area.width).saturating_sub(thinned_w + 1) > budget {
             guide = thinned;
             guide_w = thinned_w;
@@ -394,7 +437,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
         };
         Line::from(Span::styled(
             truncate(&hint, chunks[0].width as usize),
-            Style::default().fg(*MUTED),
+            Style::default().fg(app.theme.muted),
         ))
     } else {
         let (text, color) = if let Some(toast) = app.active_toast(now) {
@@ -404,15 +447,15 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
                 ToastKind::Error => "! ",
             };
             let color = match toast.kind {
-                ToastKind::Info => *MUTED,
-                ToastKind::Success => *SUCCESS,
-                ToastKind::Error => *ERROR,
+                ToastKind::Info => app.theme.muted,
+                ToastKind::Success => app.theme.success,
+                ToastKind::Error => app.theme.error,
             };
             (format!("{prefix}{}", toast.text), color)
         } else if let Some(download) = &app.download {
             (
                 format!("↓ {}%  {}", download.percent, truncate(&download.title, 34)),
-                *WARN,
+                app.theme.warn,
             )
         } else if app.loading {
             // The removed header used to carry the fetch spinner; keep it
@@ -423,7 +466,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
                     app.spinner_frame(now),
                     truncate(&app.loading_label, 30)
                 ),
-                *MUTED,
+                app.theme.muted,
             )
         } else {
             (
@@ -432,7 +475,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
                     app.store.saved.len(),
                     app.store.history.len()
                 ),
-                *MUTED,
+                app.theme.muted,
             )
         };
         Line::from(Span::styled(
@@ -451,7 +494,7 @@ fn draw_overlay(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
         Overlay::Search(_) => {}
         Overlay::Actions { index, actions } => draw_actions(frame, area, app, *index, actions),
         Overlay::Quality { index } => draw_quality(frame, area, app, *index),
-        Overlay::Help => draw_help(frame, area),
+        Overlay::Help => draw_help(frame, area, app),
     }
 }
 
@@ -487,27 +530,35 @@ fn draw_quality(frame: &mut Frame, area: Rect, app: &App, index: usize) {
         })
         .unwrap_or_else(|| "quality".to_string());
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(title, Style::default().fg(*MUTED)))),
+        Paragraph::new(Line::from(Span::styled(
+            title,
+            Style::default().fg(app.theme.muted),
+        ))),
         sections[0],
     );
 
     let items: Vec<ListItem> = QUALITIES
         .iter()
         .map(|&(label, _)| {
-            ListItem::new(Line::from(Span::styled(label, Style::default().fg(*TEXT))))
+            ListItem::new(Line::from(Span::styled(
+                label,
+                Style::default().fg(app.theme.text),
+            )))
         })
         .collect();
     let mut state = ListState::default();
     state.select(Some(index));
-    let list = List::new(items)
-        .highlight_symbol("▌ ")
-        .highlight_style(Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD));
+    let list = List::new(items).highlight_symbol("▌ ").highlight_style(
+        Style::default()
+            .fg(app.theme.accent)
+            .add_modifier(Modifier::BOLD),
+    );
     frame.render_stateful_widget(list, sections[1], &mut state);
 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             "enter download · esc",
-            Style::default().fg(*MUTED),
+            Style::default().fg(app.theme.muted),
         ))),
         sections[2],
     );
@@ -517,7 +568,7 @@ fn draw_quality(frame: &mut Frame, area: Rect, app: &App, index: usize) {
 /// motif (or the row width, whichever is shorter) so ultra-wide terminals
 /// keep its intended shape, painted in the same pywal color ytmtui uses for
 /// its rule (color6 / accent2).
-fn draw_rule(frame: &mut Frame, area: Rect) {
+fn draw_rule(frame: &mut Frame, area: Rect, theme: &Theme) {
     if area.height == 0 || area.width == 0 {
         return;
     }
@@ -526,7 +577,7 @@ fn draw_rule(frame: &mut Frame, area: Rect) {
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             rule,
-            Style::default().fg(*ACCENT2),
+            Style::default().fg(theme.accent2),
         ))),
         Rect::new(area.x, area.y, area.width, 1),
     );
@@ -546,14 +597,16 @@ fn draw_search(frame: &mut Frame, area: Rect, app: &App) {
     let prefix = "/ ";
     let mut spans = vec![Span::styled(
         prefix,
-        Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(app.theme.accent)
+            .add_modifier(Modifier::BOLD),
     )];
     let row = Rect::new(area.x, area.y, area.width, 1);
     match input {
         Some(input) => {
             spans.push(Span::styled(
                 input.value.clone(),
-                Style::default().fg(*TEXT),
+                Style::default().fg(app.theme.text),
             ));
             frame.render_widget(Paragraph::new(Line::from(spans)), row);
             let cursor_x = area
@@ -566,7 +619,7 @@ fn draw_search(frame: &mut Frame, area: Rect, app: &App) {
         None => {
             spans.push(Span::styled(
                 "search youtube · filters".to_string(),
-                Style::default().fg(*MUTED),
+                Style::default().fg(app.theme.muted),
             ));
             frame.render_widget(Paragraph::new(Line::from(spans)), row);
         }
@@ -585,7 +638,10 @@ fn draw_actions(frame: &mut Frame, area: Rect, app: &App, index: usize, actions:
         .map(|video| truncate(&video.title, width.saturating_sub(2) as usize))
         .unwrap_or_else(|| "actions".to_string());
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(title, Style::default().fg(*MUTED)))),
+        Paragraph::new(Line::from(Span::styled(
+            title,
+            Style::default().fg(app.theme.muted),
+        ))),
         sections[0],
     );
 
@@ -595,9 +651,11 @@ fn draw_actions(frame: &mut Frame, area: Rect, app: &App, index: usize, actions:
             ListItem::new(Line::from(vec![
                 Span::styled(
                     format!("{:>2}  ", action.key),
-                    Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(app.theme.accent)
+                        .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(action.label, Style::default().fg(*TEXT)),
+                Span::styled(action.label, Style::default().fg(app.theme.text)),
             ]))
         })
         .collect();
@@ -609,7 +667,7 @@ fn draw_actions(frame: &mut Frame, area: Rect, app: &App, index: usize, actions:
     frame.render_stateful_widget(list, sections[1], &mut state);
 }
 
-fn draw_help(frame: &mut Frame, area: Rect) {
+fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
     let width = area.width.saturating_sub(6).clamp(36, 86).min(area.width);
     let height = area.height.saturating_sub(2).min(34).min(area.height);
     let rect = centered(area, width, height);
@@ -620,87 +678,96 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         .inner(rect);
 
     let lines = vec![
-        section("global"),
-        hint_line(&[("/", "search"), ("m", "menu"), ("?", "help"), ("q", "quit")]),
+        section("global", &app.theme),
+        hint_line(
+            &[("/", "search"), ("m", "menu"), ("?", "help"), ("q", "quit")],
+            &app.theme,
+        ),
         Line::from(Span::styled(
             "search accepts queries, colon filters, and plain URLs",
-            Style::default().fg(*MUTED),
+            Style::default().fg(app.theme.muted),
         )),
         Line::from(""),
-        section("feeds"),
-        hint_line(&[
-            ("1", "my feeds"),
-            ("2", "watch later"),
-            ("3", "liked"),
-            ("4", "saved"),
-            ("5", "history"),
-        ]),
+        section("feeds", &app.theme),
+        hint_line(
+            &[
+                ("1", "my feeds"),
+                ("2", "watch later"),
+                ("3", "liked"),
+                ("4", "saved"),
+                ("5", "history"),
+            ],
+            &app.theme,
+        ),
         Line::from(Span::styled(
             "letters F S H f still jump to my feeds · saved · history · subs",
-            Style::default().fg(*MUTED),
+            Style::default().fg(app.theme.muted),
         )),
         Line::from(""),
-        section("list"),
-        hint_line(&[
-            ("j/k/n/p", "move"),
-            ("g/G", "first/last"),
-            ("enter/space", "play"),
-            ("s", "save/unsave"),
-            ("r", "remove saved"),
-            ("l", "like/unlike"),
-            ("w", "watch later"),
-            ("A", "audio only"),
-            ("d", "pick quality"),
-            ("D", "download audio"),
-            ("c", "channel"),
-            ("y", "copy"),
-            ("o", "open"),
-            ("R", "refresh"),
-            ("b/esc", "back"),
-        ]),
+        section("list", &app.theme),
+        hint_line(
+            &[
+                ("j/k/n/p", "move"),
+                ("g/G", "first/last"),
+                ("enter/space", "play"),
+                ("s", "save/unsave"),
+                ("r", "remove saved"),
+                ("l", "like/unlike"),
+                ("w", "watch later"),
+                ("A", "audio only"),
+                ("d", "pick quality"),
+                ("D", "download audio"),
+                ("c", "channel"),
+                ("y", "copy"),
+                ("o", "open"),
+                ("R", "refresh"),
+                ("b/esc", "back"),
+            ],
+            &app.theme,
+        ),
         Line::from(""),
-        section("filters"),
+        section("filters", &app.theme),
         Line::from(Span::styled(
             filter_names(0, 10),
-            Style::default().fg(*MUTED),
+            Style::default().fg(app.theme.muted),
         )),
         Line::from(Span::styled(
             filter_names(10, 21),
-            Style::default().fg(*MUTED),
+            Style::default().fg(app.theme.muted),
         )),
         Line::from(Span::styled(
             "recall  !1  !2  !3",
-            Style::default().fg(*MUTED),
+            Style::default().fg(app.theme.muted),
         )),
         Line::from(""),
-        section("cookies"),
+        section("cookies", &app.theme),
         Line::from(Span::styled(
             "set cookies_browser in config.toml for subscriptions,",
-            Style::default().fg(*MUTED),
+            Style::default().fg(app.theme.muted),
         )),
         Line::from(Span::styled(
             "watch later, and liked videos",
-            Style::default().fg(*MUTED),
+            Style::default().fg(app.theme.muted),
         )),
         Line::from(""),
-        section("account"),
+        section("account", &app.theme),
         Line::from(Span::styled(
             "l and w write real likes / Watch Later to your YouTube",
-            Style::default().fg(*MUTED),
+            Style::default().fg(app.theme.muted),
         )),
         Line::from(Span::styled(
             "account when cookies_browser is set (account_sync = true);",
-            Style::default().fg(*MUTED),
+            Style::default().fg(app.theme.muted),
         )),
         Line::from(Span::styled(
             "otherwise they toggle local mirrors only",
-            Style::default().fg(*MUTED),
+            Style::default().fg(app.theme.muted),
         )),
         Line::from(""),
-        section("downloads"),
+        section("downloads", &app.theme),
         Line::from(Span::styled(
             "download_dir/video and download_dir/audio",
-            Style::default().fg(*MUTED),
+            Style::default().fg(app.theme.muted),
         )),
     ];
     frame.render_widget(
@@ -709,19 +776,21 @@ fn draw_help(frame: &mut Frame, area: Rect) {
     );
 }
 
-fn hint_line(hints: &[(&str, &str)]) -> Line<'static> {
+fn hint_line(hints: &[(&str, &str)], theme: &Theme) -> Line<'static> {
     let mut spans = Vec::new();
     for (index, (key_value, label)) in hints.iter().enumerate() {
         if index > 0 {
-            spans.push(Span::styled("  ", Style::default().fg(*MUTED)));
+            spans.push(Span::styled("  ", Style::default().fg(theme.muted)));
         }
         spans.push(Span::styled(
             (*key_value).to_string(),
-            Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(
             format!(" {label}"),
-            Style::default().fg(*MUTED),
+            Style::default().fg(theme.muted),
         ));
     }
     Line::from(spans)
@@ -730,35 +799,39 @@ fn hint_line(hints: &[(&str, &str)]) -> Line<'static> {
 /// The right-side key guide (ytmtui footer style): key picked out in the
 /// accent bold, label muted, custom separator — returned with its rendered
 /// width so the status layout can budget the message next to it.
-fn guide_line(hints: &[(&str, &str)], separator: &str) -> (Line<'static>, usize) {
+fn guide_line(hints: &[(&str, &str)], separator: &str, theme: &Theme) -> (Line<'static>, usize) {
     let mut spans = Vec::new();
     let mut width = 0usize;
     for (index, (key_value, label)) in hints.iter().enumerate() {
         if index > 0 {
             spans.push(Span::styled(
                 separator.to_string(),
-                Style::default().fg(*MUTED),
+                Style::default().fg(theme.muted),
             ));
             width += separator.chars().count();
         }
         spans.push(Span::styled(
             (*key_value).to_string(),
-            Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
         ));
         width += key_value.chars().count();
         spans.push(Span::styled(
             format!(" {label}"),
-            Style::default().fg(*MUTED),
+            Style::default().fg(theme.muted),
         ));
         width += 1 + label.chars().count();
     }
     (Line::from(spans), width)
 }
 
-fn section(label: &'static str) -> Line<'static> {
+fn section(label: &'static str, theme: &Theme) -> Line<'static> {
     Line::from(Span::styled(
         label,
-        Style::default().fg(*ACCENT).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD),
     ))
 }
 
@@ -810,6 +883,23 @@ mod tests {
         terminal
             .draw(|frame| draw(frame, &mut app, Instant::now()))
             .unwrap();
+    }
+
+    #[test]
+    fn header_shows_signed_in_account() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = app();
+        app.account_name = Some("Qu!m Ashley Cast!ll0".into());
+        terminal
+            .draw(|frame| draw(frame, &mut app, Instant::now()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let row: String = (0..buffer.area.width)
+            .map(|x| buffer[(x, 0)].symbol())
+            .collect();
+        assert!(row.contains("UTUI"), "{row}");
+        assert!(row.contains("Qu!m Ashley Cast!ll0"), "{row}");
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use crate::config::{Config, Paths};
 use crate::store::{RememberedFeed, Store};
 use crate::sync::SyncAction;
+use crate::theme::Theme;
 use crate::util::{copy_to_clipboard, now_unix};
 use crate::yt::{self, FeedData, FetchSpec, Video};
 use anyhow::{bail, Result};
@@ -10,7 +11,7 @@ use ratatui::widgets::TableState;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 const TOAST_LIFETIME: Duration = Duration::from_secs(5);
 
@@ -331,6 +332,8 @@ pub enum Msg {
         ok: bool,
         message: String,
     },
+    /// Signed-in account name for the header (fetched in the background).
+    AccountName(Option<String>),
 }
 
 /// A thumbnail fetch request queued by the app and dispatched by the runtime.
@@ -482,10 +485,32 @@ pub struct App {
     pending_effect: Option<Effect>,
     pending_thumbnail: Option<ThumbSpec>,
     started: Instant,
+    /// Wallpaper-tool palette (pywal / wallust / matugen), reloaded live by
+    /// `poll_theme` when the tool rewrites its colours.
+    pub theme: Theme,
+    /// The palette file the theme came from, plus the mtime we last read —
+    /// together these let `poll_theme` notice a wallpaper change with a
+    /// single `stat()` in the steady state.
+    theme_src: Option<PathBuf>,
+    theme_mtime: Option<SystemTime>,
+    theme_poll_at: Instant,
+    /// Signed-in account name, fetched in the background for the header.
+    pub account_name: Option<String>,
 }
 
 impl App {
     pub fn new(paths: Paths, config: Config, store: Store) -> Self {
+        // The detected palette, plus the file it came from and that file's
+        // mtime — together these let `poll_theme` notice a wallpaper change
+        // and repaint without re-reading the palette every tick.
+        let (theme, theme_src) = match Theme::load_with_source() {
+            Some((theme, path)) => (theme, Some(path)),
+            None => (Theme::default(), None),
+        };
+        let theme_mtime = theme_src
+            .as_ref()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok());
         let mut app = Self {
             paths,
             config,
@@ -511,6 +536,11 @@ impl App {
             pending_effect: None,
             pending_thumbnail: None,
             started: Instant::now(),
+            theme,
+            theme_src,
+            theme_mtime,
+            theme_poll_at: Instant::now(),
+            account_name: None,
         };
         app.restore_last_feed();
         app
@@ -1545,6 +1575,76 @@ impl App {
                     }
                 }
             }
+            Msg::AccountName(name) => self.account_name = name,
+        }
+    }
+
+    /// Notice wallpaper-tool palette changes while the TUI runs. Throttled to
+    /// one `stat()` per second so a stable palette costs nothing. If a writer
+    /// is truncating the newest file, it is skipped until the write lands and
+    /// the current colours stay on screen.
+    pub fn poll_theme(&mut self) {
+        const POLL_INTERVAL: Duration = Duration::from_secs(1);
+        if self.theme_poll_at.elapsed() < POLL_INTERVAL {
+            return;
+        }
+        self.theme_poll_at = Instant::now();
+
+        // No theming tool at all: fall back to the terminal's own colours.
+        let Some(latest) = Theme::latest_file() else {
+            if self.theme_src.is_some() {
+                self.theme_src = None;
+                self.theme_mtime = None;
+                self.theme = Theme::default();
+            }
+            return;
+        };
+
+        // Steady state: the file we already follow is still the newest. If
+        // its mtime has not moved there is nothing else to inspect, and if it
+        // is mid-write we keep the last good theme instead of falling back to
+        // an older wallpaper palette.
+        if self.theme_src.as_ref() == Some(&latest) {
+            let Ok(meta) = std::fs::metadata(&latest) else {
+                return;
+            };
+            let mtime = meta.modified().ok();
+            if self.theme_mtime == mtime {
+                return;
+            }
+            if let Some(theme) = Theme::reload_from(&latest) {
+                self.theme = theme;
+                self.theme_mtime = mtime;
+            }
+            return;
+        }
+
+        let Some(path) = Theme::source_file() else {
+            // A palette exists but none parses yet: a writer is probably
+            // mid-update. Keep the last good theme unless its file is gone.
+            if self.theme_src.as_ref().is_some_and(|src| !src.exists()) {
+                self.theme_src = None;
+                self.theme_mtime = None;
+                self.theme = Theme::default();
+            }
+            return;
+        };
+
+        // If we can't stat it, leave the watched state alone and try again
+        // next second rather than latching on a missing mtime.
+        let Ok(meta) = std::fs::metadata(&path) else {
+            return;
+        };
+        let mtime = meta.modified().ok();
+        if self.theme_src.as_ref() == Some(&path) && self.theme_mtime == mtime {
+            return;
+        }
+        // Only latch the path/mtime once the palette parsed. A failed read
+        // means the writer is still going; the next poll retries.
+        if let Some(theme) = Theme::reload_from(&path) {
+            self.theme = theme;
+            self.theme_src = Some(path);
+            self.theme_mtime = mtime;
         }
     }
 

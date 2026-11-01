@@ -2,7 +2,7 @@
 
 **Utui** is a blazing-fast terminal YouTube browser written in Rust.
 
-It reimplements the `yt-x` workflow as a single native binary: no shell script, no `fzf`, no `jq`, no pipeline juggling. `yt-dlp` does extraction, `mpv` does playback, and a ratatui interface keeps the whole flow fast and keyboard-first.
+The classic terminal-YouTube workflow as a single native binary: no shell script, no `fzf`, no `jq`, no pipeline juggling. `yt-dlp` does extraction, `mpv` does playback, and a ratatui interface keeps the whole flow fast and keyboard-first.
 
 ## Features
 
@@ -17,7 +17,8 @@ It reimplements the `yt-x` workflow as a single native binary: no shell script, 
 - **Library** — locally saved videos and watch history, stored as JSON.
 - **Cookie-backed feeds** — the YouTube home feed (My Feeds), Subscriptions, Watch Later, and Liked videos via `yt-dlp --cookies-from-browser`.
 - **Feeds on launch** — Utui reopens the feed you were viewing when you last quit, so content is on screen immediately.
-- **pywal colors** — when `~/.cache/wal/colors.json` exists (written by [pywal](https://github.com/dylanaraps/pywal)), the wallpaper's 16-color palette drives the interface: text uses the palette foreground, and accent/success/warning/error/dim all map to palette colors — while the background stays your terminal's own (transparency included). Without pywal, Utui uses your terminal's own colors with a cyan accent.
+- **Wallpaper theming** — [pywal](https://github.com/dylanaraps/pywal), [wallust](https://github.com/Fuffy/wallust), and [matugen](https://github.com/0xAdarsh/matugen) are all detected: their cache/config directories and JSON template outputs are scanned, the newest valid palette wins, and it is **reloaded live** — change your wallpaper and the running TUI repaints within a second, no restart. Text, accent, warning, error, and dim map to palette colors, while the background stays your terminal's own (transparency included). Without any theming tool, Utui uses your terminal's own colors with a cyan accent.
+- **Signed-in account in the header** — when `cookies_browser` is configured, Utui reads your YouTube account name in the background and shows it on the header line above the search input: `UTUI ⟢ <your name>`.
 - **Scriptable** — `--json` gives clean machine-readable output for scripts and pipelines.
 - **Small and fast** — release builds use LTO and a single codegen unit. The only HTTP traffic is thumbnail downloads from YouTube's image CDN.
 
@@ -42,6 +43,23 @@ install -Dm755 target/release/utui ~/.local/bin/utui
 ```
 
 Make sure `~/.local/bin` is on your `PATH`.
+
+### Arch Linux (AUR)
+
+Utui is on the [AUR](https://aur.archlinux.org/) as [`utui`](https://aur.archlinux.org/packages/utui):
+
+```bash
+paru -S utui            # with paru
+yay -S utui             # with yay
+```
+
+Or clone the AUR repo and build it yourself:
+
+```bash
+git clone https://aur.archlinux.org/utui.git
+cd utui
+makepkg -si
+```
 
 ## Usage
 
@@ -248,9 +266,9 @@ Notes:
 - Without `cookies_browser`, or with `account_sync = false`, `l` and `w` toggle local mirrors only (the `S` Saved-list equivalent lives locally) and a toast says so.
 - Feeds for Watch Later and Liked videos remain read-through yt-dlp. After a successful sync on those pages, Utui refreshes the list automatically.
 
-## How it compares to yt-x
+## How it compares to the shell-script workflow
 
-Utui is an independent Rust implementation inspired by the `yt-x` workflow. The core interaction model — search, feeds, channels, playback, downloads, and local history — is deliberately similar.
+Utui is an independent Rust implementation of the classic terminal-YouTube workflow. The core interaction model — search, feeds, channels, playback, downloads, and local history — is deliberately similar.
 
 What is different:
 
@@ -283,4 +301,4 @@ The code is split into:
 
 ## License
 
-MIT. Utui is not affiliated with YouTube, yt-dlp, mpv, or the yt-x project.
+MIT. Utui is not affiliated with YouTube, yt-dlp, mpv, or any other project.
