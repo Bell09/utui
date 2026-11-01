@@ -20,7 +20,7 @@ The classic terminal-YouTube workflow as a single native binary: no shell script
 - **Wallpaper theming** — [pywal](https://github.com/dylanaraps/pywal), [wallust](https://github.com/Fuffy/wallust), and [matugen](https://github.com/0xAdarsh/matugen) are all detected: their cache/config directories and JSON template outputs are scanned, the newest valid palette wins, and it is **reloaded live** — change your wallpaper and the running TUI repaints within a second, no restart. Text, accent, warning, error, and dim map to palette colors, while the background stays your terminal's own (transparency included). Without any theming tool, Utui uses your terminal's own colors with a cyan accent.
 - **Signed-in account in the header** — when `cookies_browser` is configured, Utui reads your YouTube account name in the background and shows it on the header line above the search input: `UTUI ⟢ <your name>`.
 - **Scriptable** — `--json` gives clean machine-readable output for scripts and pipelines.
-- **Small and fast** — release builds use LTO and a single codegen unit. The only HTTP traffic is thumbnail downloads from YouTube's image CDN.
+- **Small and fast** — release builds use LTO and a single codegen unit. The only HTTP traffic is thumbnail downloads from YouTube's image CDN (over one shared HTTP connection pool). The TUI redraws only when something changes — an idle screen costs nothing to keep open, and the loading spinner keeps animating at 10 fps only while it is visible — and both on-disk caches (feeds and thumbnails) are capped, so `~/.cache/utui` never grows without bound.
 
 ## Requirements
 
@@ -167,7 +167,7 @@ Home and Browse share one key map: navigation and playback follow the usual play
 | `y` | Copy the video URL |
 | `o` | Open in browser |
 | `R` | Refresh the current feed (bypasses cache) |
-| `N` / `P` | Next / previous page of the list — yt-x style windowed paging on My Feeds, Watch Later, Liked, channels, playlists, and search (pages of `results` from the config; a `page n · N next · P previous` banner names the window) |
+| `N` / `P` | Next / previous page of the list — yt-x style windowed paging on My Feeds, Watch Later, Liked, channels, playlists, and search (pages of `results` from the config; a `page n · N next · P previous` banner names the window). Numbering is continuous across pages: page 1 is 1-50, page 2 is 51-100, and so on |
 | `b` / `Esc` | Back (with a stacked feed; `Esc` also cancels a running fetch) |
 
 ### Home

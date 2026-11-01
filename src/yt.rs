@@ -555,6 +555,11 @@ fn read_cache(spec: &FetchSpec) -> Option<FeedData> {
     }
 }
 
+/// Feed cache files are tiny but unbounded in number (one per URL window);
+/// this cap keeps `~/.cache/utui/feeds` a small directory — the oldest
+/// entries fall off on every write past it.
+const MAX_FEED_CACHE_FILES: usize = 64;
+
 fn write_cache(spec: &FetchSpec, data: &FeedData) {
     let Some(path) = cache_path(spec) else {
         return;
@@ -570,6 +575,7 @@ fn write_cache(spec: &FetchSpec, data: &FeedData) {
         data: data.clone(),
     }) {
         let _ = write_atomic(&path, &body);
+        crate::util::prune_cache_dir(parent, MAX_FEED_CACHE_FILES);
     }
 }
 

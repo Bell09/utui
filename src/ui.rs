@@ -175,9 +175,18 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
         area
     };
 
+    // Numbering runs continuously across pages — page 1 ends at 50, page 2
+    // starts at 51 — so the number column widens on its own once a window
+    // passes 99 or 999.
+    let page_offset = app.feed_page.saturating_sub(1) * app.config.results;
+    let number_width = (page_offset + app.feed.items.len())
+        .to_string()
+        .len()
+        .max(2);
+
     let show_views = area.width >= 58;
     let mut widths = vec![
-        Constraint::Length(2),
+        Constraint::Length(number_width as u16),
         Constraint::Fill(1),
         Constraint::Length(7),
     ];
@@ -200,9 +209,11 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
         cells
     });
 
-    let title_width =
-        area.width
-            .saturating_sub(if show_views { 2 + 7 + 7 + 5 } else { 2 + 7 + 3 }) as usize;
+    let title_width = area.width.saturating_sub(if show_views {
+        number_width as u16 + 7 + 7 + 5
+    } else {
+        number_width as u16 + 7 + 3
+    }) as usize;
 
     let rows: Vec<Row> = app
         .feed
@@ -229,7 +240,7 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
 
             let mut cells = vec![
                 Cell::from(Span::styled(
-                    format!("{:>2}", index + 1),
+                    format!("{:width$}", page_offset + index + 1, width = number_width),
                     Style::default().fg(app.theme.muted),
                 )),
                 Cell::from(Line::from(title_spans)),
@@ -900,6 +911,15 @@ mod tests {
         App::new(paths, Config::default(), Store::default())
     }
 
+    /// Every cell symbol on screen, in reading order.
+    fn screen_text(terminal: &Terminal<TestBackend>) -> String {
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+            .map(|(x, y)| buffer[(x, y)].symbol())
+            .collect()
+    }
+
     #[test]
     fn renders_home_without_panicking() {
         let backend = TestBackend::new(120, 40);
@@ -1039,11 +1059,7 @@ mod tests {
         terminal
             .draw(|frame| draw(frame, &mut app, Instant::now()))
             .unwrap();
-        let buffer = terminal.backend().buffer();
-        let all: String = (0..buffer.area.height)
-            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
-            .map(|(x, y)| buffer[(x, y)].symbol())
-            .collect();
+        let all = screen_text(&terminal);
         assert!(all.contains("N next"), "banner missing: {all}");
 
         // Page one carries no banner.
@@ -1051,11 +1067,48 @@ mod tests {
         terminal
             .draw(|frame| draw(frame, &mut app, Instant::now()))
             .unwrap();
-        let buffer = terminal.backend().buffer();
-        let all: String = (0..buffer.area.height)
-            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
-            .map(|(x, y)| buffer[(x, y)].symbol())
-            .collect();
+        let all = screen_text(&terminal);
         assert!(!all.contains("N next"), "page 1 must not banner: {all}");
+    }
+
+    #[test]
+    fn numbering_continues_across_pages() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = app();
+        app.view = View::Browse;
+        app.feed = Feed {
+            title: "Search · rust".into(),
+            source: "https://example.com".into(),
+            kind: FeedKind::Search,
+            subtitle: "SEARCH  ·  3 RESULTS".into(),
+            items: (0..3)
+                .map(|i| Video {
+                    id: format!("v{i}"),
+                    title: format!("Video {i}"),
+                    ..Video::default()
+                })
+                .collect(),
+            notice: None,
+            auth: false,
+            fetched_at: 0,
+        };
+        app.table_state.select(Some(0));
+
+        // Page 1 numbers 1..3 — nothing like 51 is on screen.
+        terminal
+            .draw(|frame| draw(frame, &mut app, Instant::now()))
+            .unwrap();
+        let all = screen_text(&terminal);
+        assert!(!all.contains("51"), "page 1 must not show 51: {all}");
+
+        // Page 2 of the same list continues at 51 (offset 50 + index).
+        app.feed_page = 2;
+        terminal
+            .draw(|frame| draw(frame, &mut app, Instant::now()))
+            .unwrap();
+        let all = screen_text(&terminal);
+        assert!(all.contains("51"), "page 2 must start at 51: {all}");
+        assert!(all.contains("53"), "page 2 ends at 53: {all}");
     }
 }

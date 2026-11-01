@@ -1689,10 +1689,13 @@ impl App {
     /// one `stat()` per second so a stable palette costs nothing. If a writer
     /// is truncating the newest file, it is skipped until the write lands and
     /// the current colours stay on screen.
-    pub fn poll_theme(&mut self) {
+    /// Watch the followed palette file for edits. Returns true when the
+    /// colours actually changed, so the main loop can redraw exactly then
+    /// instead of repainting every frame.
+    pub fn poll_theme(&mut self) -> bool {
         const POLL_INTERVAL: Duration = Duration::from_secs(1);
         if self.theme_poll_at.elapsed() < POLL_INTERVAL {
-            return;
+            return false;
         }
         self.theme_poll_at = Instant::now();
 
@@ -1701,9 +1704,11 @@ impl App {
             if self.theme_src.is_some() {
                 self.theme_src = None;
                 self.theme_mtime = None;
+                let changed = self.theme != Theme::default();
                 self.theme = Theme::default();
+                return changed;
             }
-            return;
+            return false;
         };
 
         // Steady state: the file we already follow is still the newest. If
@@ -1712,17 +1717,19 @@ impl App {
         // an older wallpaper palette.
         if self.theme_src.as_ref() == Some(&latest) {
             let Ok(meta) = std::fs::metadata(&latest) else {
-                return;
+                return false;
             };
             let mtime = meta.modified().ok();
             if self.theme_mtime == mtime {
-                return;
+                return false;
             }
             if let Some(theme) = Theme::reload_from(&latest) {
+                let changed = self.theme != theme;
                 self.theme = theme;
                 self.theme_mtime = mtime;
+                return changed;
             }
-            return;
+            return false;
         }
 
         let Some(path) = Theme::source_file() else {
@@ -1731,27 +1738,32 @@ impl App {
             if self.theme_src.as_ref().is_some_and(|src| !src.exists()) {
                 self.theme_src = None;
                 self.theme_mtime = None;
+                let changed = self.theme != Theme::default();
                 self.theme = Theme::default();
+                return changed;
             }
-            return;
+            return false;
         };
 
         // If we can't stat it, leave the watched state alone and try again
         // next second rather than latching on a missing mtime.
         let Ok(meta) = std::fs::metadata(&path) else {
-            return;
+            return false;
         };
         let mtime = meta.modified().ok();
         if self.theme_src.as_ref() == Some(&path) && self.theme_mtime == mtime {
-            return;
+            return false;
         }
         // Only latch the path/mtime once the palette parsed. A failed read
         // means the writer is still going; the next poll retries.
+        let mut changed = false;
         if let Some(theme) = Theme::reload_from(&path) {
+            changed = self.theme != theme;
             self.theme = theme;
             self.theme_src = Some(path);
             self.theme_mtime = mtime;
         }
+        changed
     }
 
     /// Applies one completed sync action to the local mirror: keep the state on

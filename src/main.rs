@@ -217,18 +217,46 @@ async fn run_tui(app: &mut App) -> Result<()> {
     let mut active_thumb: Option<JoinHandle<()>> = None;
     let mut active_sync: Option<JoinHandle<()>> = None;
 
+    // The loop redraws only when something happened (input, a message, a
+    // state change) or when animated chrome needs a tick. Previously it
+    // repainted unconditionally ~28 times a second, recomputing the
+    // half-block thumbnail pane for a screen that had not changed.
+    let mut dirty = true;
+    let mut last_draw = Instant::now();
+
     let result: Result<()> = async {
         loop {
-            if event::poll(Duration::from_millis(35))? {
+            // While a spinner or toast is on screen, poll briskly so the
+            // animation stays smooth; when nothing moves, sleep between
+            // polls. Key latency is unaffected: a keypress wakes the poll
+            // immediately and is drawn on the very next pass.
+            let animating = app.loading
+                || app
+                    .toast
+                    .as_ref()
+                    .is_some_and(|t| t.is_visible(Instant::now()));
+            let poll = if animating {
+                Duration::from_millis(35)
+            } else {
+                Duration::from_millis(250)
+            };
+            if event::poll(poll)? {
                 match event::read()? {
-                    Event::Key(key) => app.handle_key(key),
-                    Event::Paste(text) => handle_paste(app, &text),
+                    Event::Key(key) => {
+                        app.handle_key(key);
+                        dirty = true;
+                    }
+                    Event::Paste(text) => {
+                        handle_paste(app, &text);
+                        dirty = true;
+                    }
                     _ => {}
                 }
             }
 
             while let Ok(message) = rx.try_recv() {
                 app.handle_msg(message);
+                dirty = true;
             }
 
             if let Some(spec) = app.take_fetch() {
@@ -312,9 +340,14 @@ async fn run_tui(app: &mut App) -> Result<()> {
                         }
                     }
                 }
+                // Effects may have torn down and rebuilt the terminal
+                // (playing media), so the next frame must be painted.
+                dirty = true;
             }
 
-            app.poll_theme();
+            if app.poll_theme() {
+                dirty = true;
+            }
             app.sync_thumbnail();
             if let Some(spec) = app.take_thumbnail() {
                 if let Some(handle) = active_thumb.take() {
@@ -332,7 +365,23 @@ async fn run_tui(app: &mut App) -> Result<()> {
                 }));
             }
 
-            terminal.draw(|frame| ui::draw(frame, app, Instant::now()))?;
+            // Redraw when something changed; while idle, at most once a
+            // second so relative timestamps in the status line stay fresh.
+            let animating = app.loading
+                || app
+                    .toast
+                    .as_ref()
+                    .is_some_and(|t| t.is_visible(Instant::now()));
+            let tick = if animating {
+                Duration::from_millis(100)
+            } else {
+                Duration::from_secs(1)
+            };
+            if dirty || last_draw.elapsed() >= tick {
+                terminal.draw(|frame| ui::draw(frame, app, Instant::now()))?;
+                dirty = false;
+                last_draw = Instant::now();
+            }
 
             if app.quit {
                 break;

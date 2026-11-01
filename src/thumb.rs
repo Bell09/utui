@@ -23,6 +23,10 @@ pub fn halfblocks_picker() -> Picker {
     Picker::halfblocks()
 }
 
+/// Thumbnail cache files (one per video) stay bounded too — beyond this
+/// count the oldest images are dropped on each write.
+const MAX_THUMB_CACHE_FILES: usize = 200;
+
 /// Load a thumbnail from the on-disk cache, downloading and decoding it on a
 /// cache miss.
 pub async fn load(url: &str, cache_path: &Path) -> Result<DynamicImage> {
@@ -34,6 +38,9 @@ pub async fn load(url: &str, cache_path: &Path) -> Result<DynamicImage> {
                 let _ = tokio::fs::create_dir_all(parent).await;
             }
             let _ = tokio::fs::write(cache_path, &bytes).await;
+            if let Some(parent) = cache_path.parent() {
+                crate::util::prune_cache_dir(parent, MAX_THUMB_CACHE_FILES);
+            }
             bytes
         }
     };
@@ -44,11 +51,23 @@ pub async fn load(url: &str, cache_path: &Path) -> Result<DynamicImage> {
         .context("could not decode thumbnail")
 }
 
-async fn download(url: &str) -> Result<Vec<u8>> {
-    let client = reqwest::Client::builder()
+/// One HTTP client for every thumbnail. The first download builds it, later
+/// ones reuse its connection pool — no new socket, TLS session, or pool per
+/// image, which keeps both memory and handshake churn flat.
+fn http_client() -> Result<&'static reqwest::Client> {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client);
+    }
+    let built = reqwest::Client::builder()
         .user_agent(concat!("utui/", env!("CARGO_PKG_VERSION")))
         .build()
         .context("could not build HTTP client")?;
+    Ok(CLIENT.get_or_init(|| built))
+}
+
+async fn download(url: &str) -> Result<Vec<u8>> {
+    let client = http_client()?;
     let response = client
         .get(url)
         .send()

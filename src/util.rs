@@ -166,6 +166,37 @@ pub fn write_atomic(path: &Path, contents: &str) -> Result<()> {
     Ok(())
 }
 
+/// Keep a cache directory bounded: once it holds more than `keep` files the
+/// oldest are deleted. Called after each cache write, so a directory that is
+/// touched constantly never grows without bound — best effort, and a quiet
+/// directory costs one `read_dir` (skipped entirely under the cap).
+pub fn prune_cache_dir(dir: &Path, keep: usize) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut files: Vec<(SystemTime, std::path::PathBuf)> = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        let Ok(meta) = fs::metadata(&path) else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        if let Ok(modified) = meta.modified() {
+            files.push((modified, path));
+        }
+    }
+    if files.len() <= keep {
+        return;
+    }
+    files.sort_by_key(|(modified, _)| *modified);
+    let excess = files.len() - keep;
+    for (_, path) in files.into_iter().take(excess) {
+        let _ = fs::remove_file(path);
+    }
+}
+
 pub fn copy_to_clipboard(value: &str) -> Result<()> {
     let candidates: &[(&str, &[&str])] = &[
         ("wl-copy", &[]),
@@ -260,5 +291,32 @@ mod tests {
         assert_eq!(relative_time_at(Some(now - 30), now), "just now");
         assert_eq!(relative_time_at(Some(now - 120), now), "2m ago");
         assert_eq!(relative_time_at(Some(now - 7_200), now), "2h ago");
+    }
+
+    #[test]
+    fn prune_cache_dir_keeps_the_newest_files() {
+        let dir = std::env::temp_dir().join(format!("utui-prune-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 0..8 {
+            std::fs::write(dir.join(format!("f{i}.json")), "{}").unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        prune_cache_dir(&dir, 5);
+
+        for i in 0..3 {
+            assert!(
+                !dir.join(format!("f{i}.json")).exists(),
+                "oldest f{i} should be pruned"
+            );
+        }
+        for i in 3..8 {
+            assert!(
+                dir.join(format!("f{i}.json")).exists(),
+                "newest f{i} should survive"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
