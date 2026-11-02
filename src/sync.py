@@ -79,6 +79,12 @@ def web_client(ydl):
 
 
 def innertube(ydl, path, body):
+    """POST one innertube call with the WEB client's request context.
+
+    Every call needs the context, and playlist edits in particular are
+    refused with FAILED_PRECONDITION without it — the failure that made
+    Watch Later removals bounce before.
+    """
     key, version = web_client(ydl)
     headers = {
         "Content-Type": "application/json",
@@ -88,12 +94,21 @@ def innertube(ydl, path, body):
         "X-Origin": ORIGIN,
         "X-Goog-AuthUser": "0",
         "Origin": ORIGIN,
+        "Referer": f"{ORIGIN}/",
         "Authorization": authorization(youtube_cookies(ydl), str(int(time.time()))),
+    }
+    payload = {
+        "context": {
+            "client": {"clientName": "WEB", "clientVersion": version, "hl": "en"},
+            "user": {"lockedSafetyMode": False},
+            "request": {"useSsl": True},
+        },
+        **body,
     }
     url = f"https://www.youtube.com/youtubei/v1/{path}?prettyPrint=false&key={key}"
     from yt_dlp.networking import Request
 
-    response = ydl.urlopen(Request(url, data=json.dumps(body).encode(), headers=headers))
+    response = ydl.urlopen(Request(url, data=json.dumps(payload).encode(), headers=headers))
     text = response.read().decode("utf-8", "ignore")
     return json.loads(text or "{}")
 
