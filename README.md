@@ -151,8 +151,8 @@ Home and Browse share one key map: navigation and playback follow the usual play
 
 | Key | Action |
 | --- | --- |
-| `j` `n` `↓` `→` `Tab` | Move down |
-| `k` `h` `p` `↑` `←` | Move up |
+| `j` `n` `↓` `→` `Tab` | Move down (wraps to the first row past the end) |
+| `k` `h` `p` `↑` `←` | Move up (wraps to the last row past the top) |
 | `g` / `G` (or `Home` / `End`) | First / last result |
 | `PageUp` / `PageDown` | Page through results |
 | `Enter` / `Space` | Play the selected video |

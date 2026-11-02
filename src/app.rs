@@ -1624,17 +1624,22 @@ impl App {
         self.pending_effect = Some(Effect::OpenUrl(video.url.clone()));
     }
 
+    /// Move the selection, wrapping like ytmtui's next/previous: down from
+    /// the last row lands on the first, up from the first on the last.
     fn move_selection(&mut self, delta: isize) {
         if self.feed.items.is_empty() {
             self.table_state.select(None);
             return;
         }
-        let last = self.feed.items.len() - 1;
+        let len = self.feed.items.len();
         let current = self.table_state.selected().unwrap_or(0);
+        let steps = delta.unsigned_abs() % len;
         let next = if delta < 0 {
-            current.saturating_sub(delta.unsigned_abs())
+            // Up: wrap backwards so stepping past the top lands at the end.
+            (current + len - steps) % len
         } else {
-            (current + delta as usize).min(last)
+            // Down: wrap forwards so stepping past the end lands at the top.
+            (current + steps) % len
         };
         self.table_state.select(Some(next));
     }
@@ -2478,5 +2483,40 @@ mod tests {
         app.handle_key(key(KeyCode::Char('X')));
         assert_eq!(app.store.queue.len(), 1);
         assert_eq!(app.store.queue[0].id, "v1");
+    }
+
+    #[test]
+    fn moving_selection_wraps_around_both_ends() {
+        let mut app = app();
+        app.feed = search_feed(); // three videos: v0 v1 v2
+        app.table_state.select(Some(0));
+
+        // j at the bottom lands on the top (loop scroll).
+        app.table_state.select(Some(2));
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.table_state.selected(), Some(0), "j past the end wraps");
+
+        // k at the top lands on the bottom.
+        app.table_state.select(Some(0));
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(app.table_state.selected(), Some(2), "k past the top wraps");
+
+        // Inside the list it steps normally, no wrapping.
+        app.table_state.select(Some(1));
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.table_state.selected(), Some(2), "j steps down in range");
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(app.table_state.selected(), Some(1), "k steps up in range");
+
+        // A ten-row page step wraps too: from row 2, PageUp lands on row 1
+        // ((2 - 10) mod 3 == 1).
+        app.table_state.select(Some(2));
+        app.handle_key(key(KeyCode::PageUp));
+        assert_eq!(app.table_state.selected(), Some(1), "PageUp wraps the page");
+
+        // An empty list never crashes on a move.
+        app.feed.items.clear();
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.table_state.selected(), None);
     }
 }
