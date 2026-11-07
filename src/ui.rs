@@ -6,7 +6,7 @@ use crate::theme::Theme;
 use crate::util::{format_date, format_duration, format_views, relative_time, truncate};
 use crate::yt::{self, Video};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
     Block, Cell, Clear, List, ListItem, ListState, Padding, Paragraph, Row, Table, Wrap,
@@ -238,7 +238,7 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
         .map(|(index, video)| {
             let mut title_spans = vec![Span::styled(
                 truncate(&video.title, title_width.max(8)),
-                Style::default().fg(app.theme.text),
+                Style::default().fg(app.theme.brand),
             )];
             if video.is_live() {
                 title_spans.push(Span::styled(" live", Style::default().fg(app.theme.error)));
@@ -256,7 +256,7 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
             let mut cells = vec![
                 Cell::from(Span::styled(
                     format!("{:width$}", page_offset + index + 1, width = number_width),
-                    Style::default().fg(app.theme.muted),
+                    Style::default().fg(Color::White),
                 )),
                 Cell::from(Line::from(title_spans)),
                 Cell::from(Span::styled(
@@ -375,7 +375,14 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
 
     lines.push(Line::from(Span::styled(
         video.title.clone(),
-        Style::default().add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(app.theme.brand)
+            .add_modifier(Modifier::BOLD),
+    )));
+    // Single-line border separating the title from the details below.
+    lines.push(Line::from(Span::styled(
+        "─".repeat(body.width.saturating_sub(2).max(1) as usize),
+        Style::default().fg(app.theme.muted),
     )));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
