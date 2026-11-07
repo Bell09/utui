@@ -209,21 +209,6 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
         widths.push(Constraint::Length(7));
     }
 
-    let header = Row::new({
-        let mut cells = vec![
-            Cell::from(""),
-            Cell::from(Span::styled("title", Style::default().fg(app.theme.muted))),
-            Cell::from(Span::styled("len", Style::default().fg(app.theme.muted))),
-        ];
-        if show_views {
-            cells.push(Cell::from(Span::styled(
-                "views",
-                Style::default().fg(app.theme.muted),
-            )));
-        }
-        cells
-    });
-
     let title_width = area.width.saturating_sub(if show_views {
         number_width as u16 + 7 + 7 + 5
     } else {
@@ -275,7 +260,6 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
         .collect();
 
     let table = Table::new(rows, widths)
-        .header(header)
         .column_spacing(1)
         .highlight_symbol("▌ ")
         .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
