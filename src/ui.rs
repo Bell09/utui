@@ -135,15 +135,82 @@ fn draw_feed_content(frame: &mut Frame, area: Rect, app: &mut App, now: Instant)
     let selected = app.selected_video().cloned();
 
     if area.width >= 88 {
-        let columns = Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)])
-            .split(area);
+        // The middle column holds the vertical divider so it sits with
+        // padding between the list and the details panel.
+        let columns = Layout::horizontal([
+            Constraint::Percentage(55),
+            Constraint::Length(25),
+            Constraint::Percentage(20),
+        ])
+        .split(area);
         draw_list(frame, columns[0], app, now);
+        draw_vertical_rule(frame, columns[1], app.theme.accent2);
         if let Some(video) = selected {
-            draw_details(frame, columns[1], app, &video);
+            draw_details(frame, columns[2], app, &video);
         }
     } else {
         draw_list(frame, area, app, now);
     }
+}
+
+/// Decorative vertical divider between the list and details panel. Renders
+/// the user's exact glyph template cycling down the column height — plain
+/// `│` rows interspersed with decorative glyphs, all starting at column 0
+/// so the vertical line stays straight.
+const DIVIDER_GLYPHS: &[&str] = &[
+    "􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮",
+    "│",
+    "₊˚",
+    "│",
+    "│",
+    "˚༢",
+    "│    􎻮ͣ̅ⷺ􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮􎻮",
+    "│",
+    "│",
+    "✧₊",
+    "│",
+    "│",
+    "│",
+    "│",
+    "𓍢⋆",
+    "│",
+    "│",
+    "│",
+    "│",
+    "│",
+    "｡°",
+    "│",
+    "│",
+    "│",
+    "│",
+    "⟡˚̈",
+    "│",
+    "│",
+    "│",
+    "`𖥔",
+    "│",
+    "│",
+    "✦\"",
+    "│",
+];
+
+/// A vertical divider between the list and details panel, rendered in a
+/// pywall colour with decorative glyphs cycling down its height.
+fn draw_vertical_rule(frame: &mut Frame, area: Rect, color: Color) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let height = area.height.saturating_sub(4).max(1);
+    let top = area.y + 2;
+    let mut lines = Vec::new();
+    for i in 0..height {
+        let glyph = DIVIDER_GLYPHS[(i as usize) % DIVIDER_GLYPHS.len()];
+        lines.push(Line::from(Span::styled(glyph, Style::default().fg(color))));
+    }
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+        Rect::new(area.x, top, area.width, height),
+    );
 }
 
 fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
