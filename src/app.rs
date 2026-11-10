@@ -240,39 +240,9 @@ impl TextInput {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActionKind {
-    Play,
-    PlayAudio,
-    QueueNext,
-    QueueEnd,
-    Download,
-    DownloadAudio,
-    Channel,
-    ToggleSave,
-    CopyUrl,
-    Browser,
-    Refresh,
-    Back,
-}
-
-#[derive(Debug, Clone)]
-pub struct Action {
-    pub kind: ActionKind,
-    pub label: &'static str,
-    pub key: &'static str,
-}
-
-impl Action {
-    fn new(kind: ActionKind, label: &'static str, key: &'static str) -> Self {
-        Self { kind, label, key }
-    }
-}
-
 #[derive(Debug)]
 pub enum Overlay {
     Search(TextInput),
-    Actions { index: usize, actions: Vec<Action> },
     Quality { index: usize },
     Help,
 }
@@ -1223,9 +1193,6 @@ impl App {
             }
             KeyCode::Char(' ') => self.play_selected(false),
 
-            // The action menu moved off Enter, which now plays.
-            KeyCode::Char('m') => self.open_actions(),
-
             // Feed jumps by digit (the home bar shows them, 1. My Feeds
             // first); the leftover letters F/S/H/f still work. w and l are
             // toggles now, not jumps.
@@ -1308,41 +1275,6 @@ impl App {
                     self.overlay = Some(Overlay::Search(input));
                 }
             },
-            Overlay::Actions { mut index, actions } => match key.code {
-                KeyCode::Esc => {}
-                KeyCode::Up | KeyCode::Char('k') => {
-                    index = index.saturating_sub(1);
-                    self.overlay = Some(Overlay::Actions { index, actions });
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    index = (index + 1).min(actions.len().saturating_sub(1));
-                    self.overlay = Some(Overlay::Actions { index, actions });
-                }
-                KeyCode::Enter => {
-                    if let Some(action) = actions.get(index) {
-                        let kind = action.kind;
-                        self.overlay = None;
-                        self.execute_action(kind);
-                    } else {
-                        self.overlay = None;
-                    }
-                }
-                KeyCode::Char(character) => {
-                    if let Some(action) = actions
-                        .iter()
-                        .find(|action| action.key.starts_with(character))
-                    {
-                        let kind = action.kind;
-                        self.overlay = None;
-                        self.execute_action(kind);
-                    } else {
-                        self.overlay = Some(Overlay::Actions { index, actions });
-                    }
-                }
-                _ => {
-                    self.overlay = Some(Overlay::Actions { index, actions });
-                }
-            },
             Overlay::Quality { mut index } => match key.code {
                 KeyCode::Esc => {}
                 KeyCode::Up | KeyCode::Char('k') => {
@@ -1369,35 +1301,6 @@ impl App {
                 _ => self.overlay = Some(Overlay::Help),
             },
         }
-    }
-
-    fn execute_action(&mut self, kind: ActionKind) {
-        match kind {
-            ActionKind::Play => self.play_selected(false),
-            ActionKind::PlayAudio => self.play_selected(true),
-            ActionKind::QueueNext => self.queue_selected_next(),
-            ActionKind::QueueEnd => self.queue_selected_append(),
-            ActionKind::Download => self.open_quality(),
-            ActionKind::DownloadAudio => self.download_selected(true, None),
-            ActionKind::Channel => self.open_selected_channel(),
-            ActionKind::ToggleSave => self.toggle_selected_saved(),
-            ActionKind::CopyUrl => self.copy_selected_url(),
-            ActionKind::Browser => self.open_selected_browser(),
-            ActionKind::Refresh => self.refresh(),
-            ActionKind::Back => self.back(),
-        }
-    }
-
-    pub fn open_actions(&mut self) {
-        let Some(video) = self.selected_video().cloned() else {
-            self.toast_info("Nothing selected");
-            return;
-        };
-        let actions = build_actions(&video, self.store.is_saved(&video.id));
-        if actions.is_empty() {
-            return;
-        }
-        self.overlay = Some(Overlay::Actions { index: 0, actions });
     }
 
     fn play_selected(&mut self, audio: bool) {
@@ -2118,34 +2021,6 @@ impl App {
     }
 }
 
-fn build_actions(video: &Video, saved: bool) -> Vec<Action> {
-    let mut actions = vec![
-        Action::new(ActionKind::Play, "Play video", "↵"),
-        Action::new(ActionKind::PlayAudio, "Play audio only", "A"),
-        Action::new(ActionKind::QueueNext, "Queue to play next", "X"),
-        Action::new(ActionKind::QueueEnd, "Queue at the end", "Z"),
-        Action::new(ActionKind::Download, "Download video", "d"),
-        Action::new(ActionKind::DownloadAudio, "Download audio", "D"),
-    ];
-    if video.channel_url.is_some() {
-        actions.push(Action::new(ActionKind::Channel, "Open channel", "c"));
-    }
-    actions.push(Action::new(
-        ActionKind::ToggleSave,
-        if saved {
-            "Remove from saved"
-        } else {
-            "Save video"
-        },
-        "a",
-    ));
-    actions.push(Action::new(ActionKind::CopyUrl, "Copy URL", "y"));
-    actions.push(Action::new(ActionKind::Browser, "Open in browser", "o"));
-    actions.push(Action::new(ActionKind::Refresh, "Refresh feed", "R"));
-    actions.push(Action::new(ActionKind::Back, "Back", "b"));
-    actions
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2472,17 +2347,6 @@ mod tests {
             app.store.last_feed.is_none(),
             "the queue is not a launch feed"
         );
-    }
-
-    #[test]
-    fn menu_queue_rows_act_like_x_and_z() {
-        let mut app = app();
-        app.feed = search_feed();
-        app.table_state.select(Some(1));
-        app.open_actions();
-        app.handle_key(key(KeyCode::Char('X')));
-        assert_eq!(app.store.queue.len(), 1);
-        assert_eq!(app.store.queue[0].id, "v1");
     }
 
     #[test]

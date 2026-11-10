@@ -1,5 +1,5 @@
 use crate::app::{
-    visible_home_items, Action, App, FeedKind, HomeItem, Overlay, ThumbnailState, ToastKind, View,
+    visible_home_items, App, FeedKind, HomeItem, Overlay, ThumbnailState, ToastKind, View,
     QUALITIES,
 };
 use crate::theme::Theme;
@@ -407,6 +407,40 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
         )));
     }
 
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "KEYBINDS",
+        Style::default()
+            .fg(app.theme.accent)
+            .add_modifier(Modifier::BOLD),
+    )));
+    let keybinds = vec![
+        ("enter", "play"),
+        ("s", "save"),
+        ("l", "like"),
+        ("w", "watch later"),
+        ("d", "pick quality"),
+        ("c", "channel"),
+        ("R", "refresh"),
+        ("N/P", "next/prev page"),
+        ("b/esc", "back"),
+        ("g/G", "first/last"),
+        ("1-5", "feeds"),
+        ("/", "search"),
+        ("q", "quit"),
+    ];
+    for (key, label) in keybinds {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{:>12} ", key),
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(label, Style::default().fg(app.theme.muted)),
+        ]));
+    }
+
     frame.render_widget(
         Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
         body,
@@ -420,7 +454,7 @@ fn thumbnail_rows(inner: Rect) -> u16 {
     if max_rows < 4 {
         return 0;
     }
-    let fixed_rows = 16u16;
+    let fixed_rows = 17u16;
     fixed_rows.clamp(4, max_rows)
 }
 
@@ -429,13 +463,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     // pinned to the right with its keys picked out in the accent.
     // The feed bar on Home shows its digits by itself, so the 1-5 hint
     // only appears while there is no stacked feed to go back to.
-    let mut hints: Vec<(&str, &str)> = vec![
-        ("j/k", "move"),
-        ("enter", "play"),
-        ("m", "menu"),
-        ("s", "save"),
-        ("l", "like"),
-    ];
+    let mut hints: Vec<(&str, &str)> = vec![("enter", "play"), ("s", "save"), ("l", "like")];
     if app.can_go_back() {
         hints.push(("b", "back"));
     } else {
@@ -527,7 +555,6 @@ fn draw_overlay(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
         // The search prompt renders in its own row (see draw_search); its
         // live hints take over the status line while it is focused.
         Overlay::Search(_) => {}
-        Overlay::Actions { index, actions } => draw_actions(frame, area, app, *index, actions),
         Overlay::Quality { index } => draw_quality(frame, area, app, *index),
         Overlay::Help => draw_help(frame, area, app),
     }
@@ -680,47 +707,6 @@ fn draw_search(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-fn draw_actions(frame: &mut Frame, area: Rect, app: &App, index: usize, actions: &[Action]) {
-    let width = area.width.saturating_sub(8).clamp(32, 64).min(area.width);
-    let height = (actions.len() as u16 + 2).min(area.height.saturating_sub(2));
-    let rect = centered(area, width, height);
-    frame.render_widget(Clear, rect);
-
-    let sections = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(rect);
-    let title = app
-        .selected_video()
-        .map(|video| truncate(&video.title, width.saturating_sub(2) as usize))
-        .unwrap_or_else(|| "actions".to_string());
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            title,
-            Style::default().fg(app.theme.muted),
-        ))),
-        sections[0],
-    );
-
-    let items: Vec<ListItem> = actions
-        .iter()
-        .map(|action| {
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("{:>2}  ", action.key),
-                    Style::default()
-                        .fg(app.theme.accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(action.label, Style::default().fg(app.theme.text)),
-            ]))
-        })
-        .collect();
-    let mut state = ListState::default();
-    state.select(Some(index));
-    let list = List::new(items)
-        .highlight_symbol("▌ ")
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
-    frame.render_stateful_widget(list, sections[1], &mut state);
-}
-
 fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
     let width = area.width.saturating_sub(6).clamp(36, 86).min(area.width);
     let height = area.height.saturating_sub(2).min(34).min(area.height);
@@ -733,7 +719,7 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
 
     let lines = vec![
         section("global", &app.theme),
-        hint_line(&[("/", "search"), ("m", "menu"), ("q", "quit")], &app.theme),
+        hint_line(&[("/", "search"), ("q", "quit")], &app.theme),
         Line::from(Span::styled(
             "search accepts queries, colon filters, and plain URLs",
             Style::default().fg(app.theme.muted),
