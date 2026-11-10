@@ -138,9 +138,9 @@ fn draw_feed_content(frame: &mut Frame, area: Rect, app: &mut App, now: Instant)
         // The middle column holds the vertical divider so it sits with
         // padding between the list and the details panel.
         let columns = Layout::horizontal([
-            Constraint::Percentage(55),
-            Constraint::Length(25),
-            Constraint::Percentage(20),
+            Constraint::Percentage(64),
+            Constraint::Length(1),
+            Constraint::Percentage(35),
         ])
         .split(area);
         draw_list(frame, columns[0], app, now);
