@@ -423,36 +423,7 @@ fn thumbnail_rows(inner: Rect) -> u16 {
 
 fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     // ytmtui footer layout: status message on the left, the keybind guide
-    // pinned to the right with its keys picked out in the accent.
-    // The feed bar on Home shows its digits by itself, so the 1-5 hint
-    // only appears while there is no stacked feed to go back to.
-    let hints: Vec<(&str, &str)> = vec![
-        ("enter", "play"),
-        ("s", "save"),
-        ("l", "like"),
-        ("1-5", "feeds"),
-        ("/", "search"),
-        ("q", "quit"),
-    ];
-
-    // Wide terminals keep the roomier two-space separator; narrow ones
-    // thin the guide instead so the message never drops below a few
-    // columns (the same budgeting ytmtui's footer does).
-    let separator = if area.width >= 128 { "  " } else { " " };
-    let (mut guide, mut guide_w) = guide_line(&hints, separator, &app.theme);
-    let budget = usize::from(area.width).saturating_sub(guide_w + 1);
-    if budget < 8 && hints.len() > 6 {
-        let (thinned, thinned_w) = guide_line(&hints[..6], separator, &app.theme);
-        if usize::from(area.width).saturating_sub(thinned_w + 1) > budget {
-            guide = thinned;
-            guide_w = thinned_w;
-        }
-    }
-    let chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Length(guide_w as u16 + 1)])
-        .split(area);
-
-    // Message left: live search guidance while the search row is focused,
-    // otherwise toast → download → fetch spinner → library counts.
+    // lives below the flipped rule at the bottom right instead.
     let left = if let Some(Overlay::Search(input)) = &app.overlay {
         let hint = if crate::app::App::looks_like_url(&input.value) {
             "enter opens this url  ·  esc cancel".to_string()
@@ -463,7 +434,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
             }
         };
         Line::from(Span::styled(
-            truncate(&hint, chunks[0].width as usize),
+            truncate(&hint, area.width as usize),
             Style::default().fg(app.theme.muted),
         ))
     } else {
@@ -506,12 +477,11 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
             )
         };
         Line::from(Span::styled(
-            truncate(&text, chunks[0].width as usize),
+            truncate(&text, area.width as usize),
             Style::default().fg(color),
         ))
     };
-    frame.render_widget(Paragraph::new(left), chunks[0]);
-    frame.render_widget(Paragraph::new(guide).alignment(Alignment::Right), chunks[1]);
+    frame.render_widget(Paragraph::new(left), area);
 }
 
 /// Detail keybinds rendered below the flipped rule at the bottom right.
@@ -831,36 +801,6 @@ fn hint_line(hints: &[(&str, &str)], theme: &Theme) -> Line<'static> {
         ));
     }
     Line::from(spans)
-}
-
-/// The right-side key guide (ytmtui footer style): key picked out in the
-/// accent bold, label muted, custom separator — returned with its rendered
-/// width so the status layout can budget the message next to it.
-fn guide_line(hints: &[(&str, &str)], separator: &str, theme: &Theme) -> (Line<'static>, usize) {
-    let mut spans = Vec::new();
-    let mut width = 0usize;
-    for (index, (key_value, label)) in hints.iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::styled(
-                separator.to_string(),
-                Style::default().fg(theme.muted),
-            ));
-            width += separator.chars().count();
-        }
-        spans.push(Span::styled(
-            (*key_value).to_string(),
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ));
-        width += key_value.chars().count();
-        spans.push(Span::styled(
-            format!(" {label}"),
-            Style::default().fg(theme.muted),
-        ));
-        width += 1 + label.chars().count();
-    }
-    (Line::from(spans), width)
 }
 
 fn section(label: &'static str, theme: &Theme) -> Line<'static> {
