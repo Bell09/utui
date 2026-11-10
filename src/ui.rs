@@ -463,13 +463,14 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     // pinned to the right with its keys picked out in the accent.
     // The feed bar on Home shows its digits by itself, so the 1-5 hint
     // only appears while there is no stacked feed to go back to.
-    let mut hints: Vec<(&str, &str)> = vec![("enter", "play"), ("s", "save"), ("l", "like")];
-    if app.can_go_back() {
-        hints.push(("b", "back"));
-    } else {
-        hints.push(("1-5", "feeds"));
-    }
-    hints.extend_from_slice(&[("/", "search"), ("q", "quit")]);
+    let hints: Vec<(&str, &str)> = vec![
+        ("enter", "play"),
+        ("s", "save"),
+        ("l", "like"),
+        ("1-5", "feeds"),
+        ("/", "search"),
+        ("q", "quit"),
+    ];
 
     // Wide terminals keep the roomier two-space separator; narrow ones
     // thin the guide instead so the message never drops below a few

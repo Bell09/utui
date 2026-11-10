@@ -648,6 +648,7 @@ impl App {
             .and_then(|index| self.feed.items.get(index))
     }
 
+    #[allow(dead_code)]
     pub fn can_go_back(&self) -> bool {
         !self.stack.is_empty()
     }
