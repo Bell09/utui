@@ -22,7 +22,7 @@ const TOP_RULE: &str =
 /// Decorative rule provided by the user, rendered flipped (reversed)
 /// just above the keybind guide.
 const BOTTOM_RULE: &str =
-    "°𝄞·──────°,─────────｡“─────────────˚｡────────────˳◜───────────｡`──────────°,──────────,'─────────`,────────.`───────',──────⸝'─────`.────.ᐣ───ᐟ.──.ᐟ─~";
+    "~─ᐟ.──.ᐟ───ᐣ.────.`─────'⸝──────,'───────`.────────,`─────────',──────────,°──────────`｡───────────◜˳────────────｡˚─────────────“｡─────────,°──────·𝄞°";
 
 /// Reverse a string character by character for the flipped bottom rule.
 fn flip_rule(s: &str) -> String {
@@ -34,56 +34,28 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
     // No background paint: the terminal's own surface (transparency,
     // blur, wallpaper) shows through everywhere.
     let layout = Layout::vertical([
-        Constraint::Length(1), // header
         Constraint::Length(1), // search prompt
         Constraint::Length(1), // decorative rule
         Constraint::Min(0),    // list + preview (feed bar menu on top row)
         Constraint::Length(1), // flipped decorative rule (above keybind guide)
-        Constraint::Length(1), // status (keybind guide)
+        Constraint::Length(1), // status
         Constraint::Length(1), // detail keybinds (below flipped rule)
     ])
     .split(area);
 
-    draw_header(frame, layout[0], app);
-    draw_search(frame, layout[1], app);
-    draw_rule(frame, layout[2], &app.theme);
+    draw_search(frame, layout[0], app);
+    draw_rule(frame, layout[1], &app.theme);
     match app.view {
-        View::Home => draw_home(frame, layout[3], app, now),
-        View::Browse => draw_browse(frame, layout[3], app, now),
+        View::Home => draw_home(frame, layout[2], app, now),
+        View::Browse => draw_browse(frame, layout[2], app, now),
     }
-    draw_bottom_rule(frame, layout[4], app);
-    draw_status(frame, layout[5], app, now);
-    draw_detail_keybinds(frame, layout[6], app);
+    draw_bottom_rule(frame, layout[3], app);
+    draw_status(frame, layout[4], app, now);
+    draw_detail_keybinds(frame, layout[5], app);
 
     if let Some(overlay) = &app.overlay {
         draw_overlay(frame, area, app, overlay);
     }
-}
-
-/// The header line above the search input (ytmtui style): the app name, and
-/// — when the cookie jar carries a signed-in YouTube session — the account
-/// name trailing it. Purely informational; no background is ever painted.
-fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
-    if area.height == 0 || area.width == 0 {
-        return;
-    }
-    let mut spans = vec![Span::styled(
-        " UTUI",
-        Style::default()
-            .fg(app.theme.brand)
-            .add_modifier(Modifier::BOLD),
-    )];
-    if let Some(name) = &app.account_name {
-        spans.push(Span::styled(" ⟢ ", Style::default().fg(app.theme.muted)));
-        // " UTUI ⟢ " reserves eight columns; keep a small margin so the
-        // name never sits flush against the terminal edge.
-        let budget = usize::from(area.width).saturating_sub(9).max(1);
-        spans.push(Span::styled(
-            truncate(name, budget),
-            Style::default().fg(app.theme.accent2),
-        ));
-    }
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn draw_home(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
@@ -869,23 +841,6 @@ mod tests {
         terminal
             .draw(|frame| draw(frame, &mut app, Instant::now()))
             .unwrap();
-    }
-
-    #[test]
-    fn header_shows_signed_in_account() {
-        let backend = TestBackend::new(120, 40);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let mut app = app();
-        app.account_name = Some("Qu!m Ashley Cast!ll0".into());
-        terminal
-            .draw(|frame| draw(frame, &mut app, Instant::now()))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
-        let row: String = (0..buffer.area.width)
-            .map(|x| buffer[(x, 0)].symbol())
-            .collect();
-        assert!(row.contains("UTUI"), "{row}");
-        assert!(row.contains("Qu!m Ashley Cast!ll0"), "{row}");
     }
 
     #[test]
