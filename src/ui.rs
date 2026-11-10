@@ -411,13 +411,13 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
     )));
     let keybinds = vec![
         ("enter", "play"),
+        ("w", "watch later"),
+        ("d", "download"),
+        ("c", "channel"),
+        ("r", "refresh"),
+        ("esc", "back"),
         ("s", "save"),
         ("l", "like"),
-        ("w", "watch later"),
-        ("d", "pick quality"),
-        ("c", "channel"),
-        ("R", "refresh"),
-        ("b/esc", "back"),
         ("1-5", "feeds"),
         ("/", "search"),
         ("q", "quit"),
