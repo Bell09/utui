@@ -140,29 +140,12 @@ fn draw_feed_content(frame: &mut Frame, area: Rect, app: &mut App, now: Instant)
         let columns = Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)])
             .split(area);
         draw_list(frame, columns[0], app, now);
-        // Always draw the title border in the details column, even when no
-        // video is selected — it stays visible as a permanent divider line.
-        draw_title_border(frame, columns[1], app.theme.accent2);
         if let Some(video) = selected {
             draw_details(frame, columns[1], app, &video);
         }
     } else {
         draw_list(frame, area, app, now);
     }
-}
-
-/// Draws the single-line border under the details title — always visible in
-/// the right column, matching the top search rule's pywall colour.
-fn draw_title_border(frame: &mut Frame, area: Rect, color: Color) {
-    if area.height == 0 || area.width == 0 {
-        return;
-    }
-    let line = Line::from(Span::styled(
-        "─".repeat(area.width.saturating_sub(2).max(1) as usize),
-        Style::default().fg(color),
-    ));
-    let row = Rect::new(area.x + 1, area.y, area.width.saturating_sub(2), 1);
-    frame.render_widget(Paragraph::new(line), row);
 }
 
 fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
