@@ -420,7 +420,7 @@ fn thumbnail_rows(inner: Rect) -> u16 {
     if max_rows < 4 {
         return 0;
     }
-    let fixed_rows = 14u16;
+    let fixed_rows = 16u16;
     fixed_rows.clamp(4, max_rows)
 }
 
