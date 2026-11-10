@@ -365,10 +365,11 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
             .fg(app.theme.brand)
             .add_modifier(Modifier::BOLD),
     )));
-    // Single-line border under the details title.
+    // Single-line border under the details title, same pywall colour as
+    // the top decorative rule (accent2 / color6).
     lines.push(Line::from(Span::styled(
         "─".repeat(body.width.saturating_sub(2).max(1) as usize),
-        Style::default().fg(app.theme.muted),
+        Style::default().fg(app.theme.accent2),
     )));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
