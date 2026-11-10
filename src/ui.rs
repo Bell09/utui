@@ -314,7 +314,7 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
 
     let mut body = inner;
     if video.thumbnail.is_some() {
-        let rows = thumbnail_rows(app, inner);
+        let rows = thumbnail_rows(inner);
         if rows > 0 {
             let thumb_area = Rect::new(inner.x, inner.y, inner.width, rows);
             if let ThumbnailState::Ready { id, protocol } = &mut app.thumbnail {
@@ -413,24 +413,15 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
     );
 }
 
-/// Rows to reserve for a 16:9 thumbnail, using the terminal's cell pixel size
-/// when known so the image is not distorted.
-fn thumbnail_rows(app: &App, inner: Rect) -> u16 {
+/// Fixed number of rows reserved for a thumbnail — every thumbnail takes the
+/// same vertical space regardless of aspect ratio.
+fn thumbnail_rows(inner: Rect) -> u16 {
     let max_rows = inner.height.saturating_sub(6);
     if max_rows < 4 {
         return 0;
     }
-    let (cell_width, cell_height) = app
-        .picker
-        .as_ref()
-        .map(|picker| picker.font_size())
-        .unwrap_or((8, 16));
-    let cell_width = cell_width.max(1) as u32;
-    let cell_height = cell_height.max(1) as u32;
-    let pixel_width = inner.width as u32 * cell_width;
-    let pixel_height = pixel_width * 9 / 16;
-    let rows = pixel_height.div_ceil(cell_height) as u16;
-    rows.clamp(4, max_rows)
+    let fixed_rows = 10u16;
+    fixed_rows.clamp(4, max_rows)
 }
 
 fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
