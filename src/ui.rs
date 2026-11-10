@@ -15,9 +15,9 @@ use ratatui::Frame;
 use ratatui_image::StatefulImage;
 use std::time::Instant;
 
-/// The decorative underline motif under the search input — the same rule
-/// ytmtui draws below its own search line.
-const TOP_RULE: &str = "',─────,'───────',─────────,'─────────────'.────────────,'───────────`,──────────,'──────────,'─────────`,────────.`───────',──────',─────`,────.`───',──`.─";
+/// The decorative underline motif under the search input.
+const TOP_RULE: &str =
+    "°𝄞·──────°,─────────｡“─────────────˚｡────────────˳◜───────────｡`──────────°,──────────,'─────────`,────────.`───────',──────⸝'─────`.────.ᐣ───ᐟ.──.ᐟ─~";
 
 /// Decorative rule provided by the user, rendered flipped (reversed)
 /// just above the keybind guide.
