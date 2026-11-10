@@ -40,6 +40,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
         Constraint::Min(0),    // list + preview (feed bar menu on top row)
         Constraint::Length(1), // flipped decorative rule (above keybind guide)
         Constraint::Length(1), // status (keybind guide)
+        Constraint::Length(1), // detail keybinds (below flipped rule)
     ])
     .split(area);
 
@@ -52,6 +53,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
     }
     draw_bottom_rule(frame, layout[4], app);
     draw_status(frame, layout[5], app, now);
+    draw_detail_keybinds(frame, layout[6], app);
 
     if let Some(overlay) = &app.overlay {
         draw_overlay(frame, area, app, overlay);
@@ -402,38 +404,6 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
         )));
     }
 
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "KEYBINDS",
-        Style::default()
-            .fg(app.theme.accent)
-            .add_modifier(Modifier::BOLD),
-    )));
-    let keybinds = vec![
-        ("enter", "play"),
-        ("w", "watch later"),
-        ("d", "download"),
-        ("c", "channel"),
-        ("r", "refresh"),
-        ("esc", "back"),
-        ("s", "save"),
-        ("l", "like"),
-        ("1-5", "feeds"),
-        ("/", "search"),
-        ("q", "quit"),
-    ];
-    for (key, label) in keybinds {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{:>12} ", key),
-                Style::default()
-                    .fg(app.theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(label, Style::default().fg(app.theme.muted)),
-        ]));
-    }
-
     frame.render_widget(
         Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
         body,
@@ -542,6 +512,47 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     };
     frame.render_widget(Paragraph::new(left), chunks[0]);
     frame.render_widget(Paragraph::new(guide).alignment(Alignment::Right), chunks[1]);
+}
+
+/// Detail keybinds rendered below the flipped rule at the bottom right.
+fn draw_detail_keybinds(frame: &mut Frame, area: Rect, app: &App) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let keybinds = vec![
+        ("enter", "play"),
+        ("w", "watch later"),
+        ("d", "download"),
+        ("c", "channel"),
+        ("r", "refresh"),
+        ("esc", "back"),
+        ("s", "save"),
+        ("l", "like"),
+        ("1-5", "feeds"),
+        ("/", "search"),
+        ("q", "quit"),
+    ];
+    // Build right-aligned keybind line: key in accent, label muted, separated by ·
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for (index, (key, label)) in keybinds.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" · ", Style::default().fg(app.theme.muted)));
+        }
+        spans.push(Span::styled(
+            key.to_string(),
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!(" {label}"),
+            Style::default().fg(app.theme.muted),
+        ));
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).alignment(Alignment::Right),
+        area,
+    );
 }
 
 fn draw_overlay(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
