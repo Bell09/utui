@@ -167,7 +167,7 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
     }
 
     // A paged feed wears a one-row banner naming the window — which page is
-    // open and the keys that move it (yt-x's Next/Previous, bound to N/P).
+    // open.
     // The play queue wears one naming the keys that edit and play it.
     let area = if app.feed_page > 1 {
         let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
@@ -179,11 +179,6 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
                     .fg(app.theme.accent)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("  ·  ", Style::default().fg(app.theme.muted)),
-            Span::styled("N", Style::default().fg(app.theme.accent)),
-            Span::styled(" next  ", Style::default().fg(app.theme.muted)),
-            Span::styled("P", Style::default().fg(app.theme.accent)),
-            Span::styled(" previous", Style::default().fg(app.theme.muted)),
         ]);
         frame.render_widget(Paragraph::new(banner), rows[0]);
         rows[1]
@@ -422,9 +417,7 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
         ("d", "pick quality"),
         ("c", "channel"),
         ("R", "refresh"),
-        ("N/P", "next/prev page"),
         ("b/esc", "back"),
-        ("g/G", "first/last"),
         ("1-5", "feeds"),
         ("/", "search"),
         ("q", "quit"),
@@ -746,7 +739,6 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
         hint_line(
             &[
                 ("j/k/n/p", "move"),
-                ("g/G", "first/last"),
                 ("enter/space", "play"),
                 ("s", "save/unsave"),
                 ("r", "remove saved"),
@@ -755,7 +747,6 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
                 ("d", "pick quality"),
                 ("c", "channel"),
                 ("R", "refresh"),
-                ("N/P", "next/prev page"),
                 ("b/esc", "back"),
             ],
             &app.theme,
@@ -1059,7 +1050,7 @@ mod tests {
             .draw(|frame| draw(frame, &mut app, Instant::now()))
             .unwrap();
         let all = screen_text(&terminal);
-        assert!(all.contains("N next"), "banner missing: {all}");
+        assert!(all.contains(" page 2"), "banner missing: {all}");
 
         // Page one carries no banner.
         app.feed_page = 1;
@@ -1067,7 +1058,7 @@ mod tests {
             .draw(|frame| draw(frame, &mut app, Instant::now()))
             .unwrap();
         let all = screen_text(&terminal);
-        assert!(!all.contains("N next"), "page 1 must not banner: {all}");
+        assert!(!all.contains(" page "), "page 1 must not banner: {all}");
     }
 
     #[test]

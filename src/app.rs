@@ -1183,10 +1183,16 @@ impl App {
             KeyCode::Home | KeyCode::Char('g') => self.select_first(),
             KeyCode::End | KeyCode::Char('G') => self.select_last(),
 
-            // Play, ytmtui style: Enter or Space. On an empty Home, Enter
-            // opens the highlighted bar cell instead.
+            // Play, ytmtui style: Enter or Space. At the last item of the
+            // page, Enter moves to the next page instead (youtube-tui style).
             KeyCode::Enter => {
-                if !self.feed.items.is_empty() {
+                let is_last = self
+                    .table_state
+                    .selected()
+                    .is_some_and(|i| i == self.feed.items.len() - 1);
+                if is_last && !self.feed_last_page {
+                    self.page_feed(true);
+                } else if !self.feed.items.is_empty() {
                     self.play_selected(false);
                 } else if self.view == View::Home {
                     self.open_visible_home_item(self.home_index);
@@ -1227,9 +1233,6 @@ impl App {
             KeyCode::Char('X') => self.queue_selected_next(),
             KeyCode::Char('Z') => self.queue_selected_append(),
 
-            // Paging through long lists, yt-x style: N next page, P previous.
-            KeyCode::Char('N') => self.page_feed(true),
-            KeyCode::Char('P') => self.page_feed(false),
             KeyCode::Char('c') => self.open_selected_channel(),
             KeyCode::Char('y') => self.copy_selected_url(),
             KeyCode::Char('o') => self.open_selected_browser(),
