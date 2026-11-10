@@ -407,12 +407,6 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
         )));
     }
 
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        truncate(&video.url, inner.width.saturating_sub(2) as usize),
-        Style::default().fg(app.theme.muted),
-    )));
-
     frame.render_widget(
         Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
         body,
@@ -456,12 +450,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     } else {
         hints.push(("1-5", "feeds"));
     }
-    hints.extend_from_slice(&[
-        ("z", "queue"),
-        ("/", "search"),
-        ("?", "help"),
-        ("q", "quit"),
-    ]);
+    hints.extend_from_slice(&[("/", "search"), ("q", "quit")]);
 
     // Wide terminals keep the roomier two-space separator; narrow ones
     // thin the guide instead so the message never drops below a few
@@ -753,10 +742,7 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
 
     let lines = vec![
         section("global", &app.theme),
-        hint_line(
-            &[("/", "search"), ("m", "menu"), ("?", "help"), ("q", "quit")],
-            &app.theme,
-        ),
+        hint_line(&[("/", "search"), ("m", "menu"), ("q", "quit")], &app.theme),
         Line::from(Span::styled(
             "search accepts queries, colon filters, and plain URLs",
             Style::default().fg(app.theme.muted),
@@ -788,35 +774,14 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
                 ("r", "remove saved"),
                 ("l", "like/unlike"),
                 ("w", "watch later"),
-                ("A", "audio only"),
                 ("d", "pick quality"),
-                ("D", "download audio"),
                 ("c", "channel"),
-                ("y", "copy"),
-                ("o", "open"),
                 ("R", "refresh"),
                 ("N/P", "next/prev page"),
                 ("b/esc", "back"),
             ],
             &app.theme,
         ),
-        Line::from(""),
-        section("queue", &app.theme),
-        hint_line(
-            &[
-                ("z", "open queue"),
-                ("X", "play next"),
-                ("Z", "add last"),
-                ("J/K", "move"),
-                ("d", "remove"),
-                ("enter", "play from here"),
-            ],
-            &app.theme,
-        ),
-        Line::from(Span::styled(
-            "the queue plays in order through mpv — one session, one playlist",
-            Style::default().fg(app.theme.muted),
-        )),
         Line::from(""),
         section("filters", &app.theme),
         Line::from(Span::styled(
