@@ -19,8 +19,8 @@ use std::time::Instant;
 /// ytmtui draws below its own search line.
 const TOP_RULE: &str = "',─────,'───────',─────────,'─────────────'.────────────,'───────────`,──────────,'──────────,'─────────`,────────.`───────',──────',─────`,────.`───',──`.─";
 
-/// Decorative bottom-right rule provided by the user, rendered flipped
-/// (reversed) at the bottom right of the screen.
+/// Decorative rule provided by the user, rendered flipped (reversed)
+/// just above the keybind guide.
 const BOTTOM_RULE: &str =
     "°𝄞·──────°,─────────｡“─────────────˚｡────────────˳◜───────────｡`──────────°,──────────,'─────────`,────────.`───────',──────⸝'─────`.────.ᐣ───ᐟ.──.ᐟ─~";
 
@@ -38,8 +38,8 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
         Constraint::Length(1), // search prompt
         Constraint::Length(1), // decorative rule
         Constraint::Min(0),    // list + preview (feed bar menu on top row)
-        Constraint::Length(1), // status
-        Constraint::Length(1), // bottom decorative rule
+        Constraint::Length(1), // flipped decorative rule (above keybind guide)
+        Constraint::Length(1), // status (keybind guide)
     ])
     .split(area);
 
@@ -50,8 +50,8 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
         View::Home => draw_home(frame, layout[3], app, now),
         View::Browse => draw_browse(frame, layout[3], app, now),
     }
-    draw_status(frame, layout[4], app, now);
-    draw_bottom_rule(frame, layout[5], app);
+    draw_bottom_rule(frame, layout[4], app);
+    draw_status(frame, layout[5], app, now);
 
     if let Some(overlay) = &app.overlay {
         draw_overlay(frame, area, app, overlay);
@@ -638,8 +638,8 @@ fn draw_rule(frame: &mut Frame, area: Rect, theme: &Theme) {
     );
 }
 
-/// The user-provided decorative rule, flipped (reversed) and rendered at
-/// the bottom right of the screen.
+/// The user-provided decorative rule, flipped (reversed) and rendered
+/// just above the keybind guide.
 fn draw_bottom_rule(frame: &mut Frame, area: Rect, app: &App) {
     if area.height == 0 || area.width == 0 {
         return;
