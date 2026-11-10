@@ -122,7 +122,10 @@ fn draw_home_menu(frame: &mut Frame, area: Rect, app: &mut App) {
         spans.push(Span::styled(format!("{}.", index + 1), key_style));
         spans.push(Span::styled(format!(" {}", item.title), title_style));
     }
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).alignment(Alignment::Left),
+        area,
+    );
 }
 
 fn draw_browse(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
