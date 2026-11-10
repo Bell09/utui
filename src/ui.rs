@@ -19,6 +19,16 @@ use std::time::Instant;
 /// ytmtui draws below its own search line.
 const TOP_RULE: &str = "',─────,'───────',─────────,'─────────────'.────────────,'───────────`,──────────,'──────────,'─────────`,────────.`───────',──────',─────`,────.`───',──`.─";
 
+/// Decorative bottom-right rule provided by the user, rendered flipped
+/// (reversed) at the bottom right of the screen.
+const BOTTOM_RULE: &str =
+    "°𝄞·──────°,─────────｡“─────────────˚｡────────────˳◜───────────｡`──────────°,──────────,'─────────`,────────.`───────',──────⸝'─────`.────.ᐣ───ᐟ.──.ᐟ─~";
+
+/// Reverse a string character by character for the flipped bottom rule.
+fn flip_rule(s: &str) -> String {
+    s.chars().rev().collect()
+}
+
 pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
     let area = frame.area();
     // No background paint: the terminal's own surface (transparency,
@@ -29,6 +39,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
         Constraint::Length(1), // decorative rule
         Constraint::Min(0),    // list + preview (feed bar menu on top row)
         Constraint::Length(1), // status
+        Constraint::Length(1), // bottom decorative rule
     ])
     .split(area);
 
@@ -40,6 +51,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
         View::Browse => draw_browse(frame, layout[3], app, now),
     }
     draw_status(frame, layout[4], app, now);
+    draw_bottom_rule(frame, layout[5], app);
 
     if let Some(overlay) = &app.overlay {
         draw_overlay(frame, area, app, overlay);
@@ -623,6 +635,25 @@ fn draw_rule(frame: &mut Frame, area: Rect, theme: &Theme) {
             Style::default().fg(theme.accent2),
         ))),
         Rect::new(area.x, area.y, area.width, 1),
+    );
+}
+
+/// The user-provided decorative rule, flipped (reversed) and rendered at
+/// the bottom right of the screen.
+fn draw_bottom_rule(frame: &mut Frame, area: Rect, app: &App) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let flipped = flip_rule(BOTTOM_RULE);
+    let width = usize::from(area.width).min(flipped.chars().count());
+    let width_u16 = width as u16;
+    let start_x = area.x.saturating_add(area.width.saturating_sub(width_u16));
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            flipped.chars().take(width).collect::<String>(),
+            Style::default().fg(app.theme.accent2),
+        ))),
+        Rect::new(start_x, area.y, width_u16, 1),
     );
 }
 
