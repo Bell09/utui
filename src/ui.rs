@@ -24,12 +24,11 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
     // No background paint: the terminal's own surface (transparency,
     // blur, wallpaper) shows through everywhere.
     let layout = Layout::vertical([
-        Constraint::Length(1),                                          // header
-        Constraint::Length(1),                                          // search prompt
-        Constraint::Length(1),                                          // decorative rule
-        Constraint::Length(if app.view == View::Home { 1 } else { 0 }), // feed bar
-        Constraint::Min(0),                                             // list + preview
-        Constraint::Length(1),                                          // status
+        Constraint::Length(1), // header
+        Constraint::Length(1), // search prompt
+        Constraint::Length(1), // decorative rule
+        Constraint::Min(0),    // list + preview (feed bar menu on top row)
+        Constraint::Length(1), // status
     ])
     .split(area);
 
@@ -37,10 +36,10 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
     draw_search(frame, layout[1], app);
     draw_rule(frame, layout[2], &app.theme);
     match app.view {
-        View::Home => draw_home(frame, layout[4], app, now),
-        View::Browse => draw_browse(frame, layout[4], app, now),
+        View::Home => draw_home(frame, layout[3], app, now),
+        View::Browse => draw_browse(frame, layout[3], app, now),
     }
-    draw_status(frame, layout[5], app, now);
+    draw_status(frame, layout[4], app, now);
 
     if let Some(overlay) = &app.overlay {
         draw_overlay(frame, area, app, overlay);
