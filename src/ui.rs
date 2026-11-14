@@ -22,7 +22,7 @@ const TOP_RULE: &str =
 /// Decorative rule provided by the user, rendered flipped (reversed)
 /// just above the keybind guide.
 const BOTTOM_RULE: &str =
-    "~─ᐟ.──.ᐟ───ᐣ.────.`─────'⸝──────,'───────`.────────,`─────────',──────────,°──────────`｡───────────◜˳────────────｡˚─────────────“｡─────────,°──────·𝄞°";
+    "°𝄞·──────°,─────────｡“─────────────˚｡────────────˳◜───────────｡`──────────°,──────────,'─────────`,────────.`───────',──────⸝'─────`.────.ᐣ───ᐟ.──.ᐟ─~";
 
 /// Reverse a string character by character for the flipped bottom rule.
 fn flip_rule(s: &str) -> String {
@@ -599,12 +599,16 @@ fn draw_bottom_rule(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
     let flipped = flip_rule(BOTTOM_RULE);
-    let width = usize::from(area.width).min(flipped.chars().count());
+    let chars: Vec<char> = flipped.chars().collect();
+    // Keep the rule's tail so its right end lands on the screen edge,
+    // flush with the keybind guide below it.
+    let width = usize::from(area.width).min(chars.len());
     let width_u16 = width as u16;
+    let tail: String = chars[chars.len() - width..].iter().collect();
     let start_x = area.x.saturating_add(area.width.saturating_sub(width_u16));
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            flipped.chars().take(width).collect::<String>(),
+            tail,
             Style::default().fg(app.theme.accent2),
         ))),
         Rect::new(start_x, area.y, width_u16, 1),
