@@ -22,7 +22,7 @@ const TOP_RULE: &str =
 /// Decorative rule provided by the user, rendered flipped (reversed)
 /// just above the keybind guide.
 const BOTTOM_RULE: &str =
-    "°𝄞·──────°,─────────｡“─────────────˚｡────────────˳◜───────────｡`──────────°,──────────,'─────────`,────────.`───────',──────⸝'─────`.────.ᐣ───ᐟ.──.ᐟ─~";
+    "°·────────°,───────────｡“───────────────˚｡──────────────˳◜─────────────｡`────────────°,────────────,'───────────`,──────────.`─────────',────────⸝'───────`.──────.ᐣ─────ᐟ.────.ᐟ───.'──'.─~";
 
 /// Reverse a string character by character for the flipped bottom rule.
 fn flip_rule(s: &str) -> String {
@@ -37,9 +37,8 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
         Constraint::Length(1), // search prompt
         Constraint::Length(1), // decorative rule
         Constraint::Min(0),    // list + preview (feed bar menu on top row)
-        Constraint::Length(1), // flipped decorative rule (above keybind guide)
-        Constraint::Length(1), // status
-        Constraint::Length(1), // detail keybinds (below flipped rule)
+        Constraint::Length(1), // flipped decorative rule
+        Constraint::Length(1), // status (left) + keybind guide (right)
     ])
     .split(area);
 
@@ -51,7 +50,6 @@ pub fn draw(frame: &mut Frame, app: &mut App, now: Instant) {
     }
     draw_bottom_rule(frame, layout[3], app);
     draw_status(frame, layout[4], app, now);
-    draw_detail_keybinds(frame, layout[5], app);
 
     if let Some(overlay) = &app.overlay {
         draw_overlay(frame, area, app, overlay);
@@ -182,7 +180,9 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App, now: Instant) {
         .len()
         .max(2);
 
-    let show_views = area.width >= 58;
+    // Watch Later and Liked videos list entries without view counts, so the
+    // column is hidden for them.
+    let show_views = area.width >= 58 && !app.feed_hides_view_counts();
     let mut widths = vec![
         Constraint::Length(number_width as u16),
         Constraint::Fill(1),
@@ -351,13 +351,23 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &mut App, video: &Video) {
         video.channel.clone(),
         Style::default().fg(app.theme.muted),
     )));
-    lines.push(Line::from(Span::styled(
+    // Watch Later and Liked videos drop the view count from this line too.
+    let meta = if app.feed_hides_view_counts() {
+        format!(
+            "{} · {}",
+            format_duration(video.duration),
+            relative_time(video.timestamp)
+        )
+    } else {
         format!(
             "{} · {} views · {}",
             format_duration(video.duration),
             format_views(video.view_count),
             relative_time(video.timestamp)
-        ),
+        )
+    };
+    lines.push(Line::from(Span::styled(
+        meta,
         Style::default().fg(app.theme.muted),
     )));
     lines.push(Line::from(Span::styled(
@@ -395,7 +405,33 @@ fn thumbnail_rows(inner: Rect) -> u16 {
 
 fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     // ytmtui footer layout: status message on the left, the keybind guide
-    // lives below the flipped rule at the bottom right instead.
+    // pinned to the right with its keys picked out in the accent.
+    let hints: Vec<(&str, &str)> = vec![
+        ("enter", "play"),
+        ("w", "watch later"),
+        ("d", "download"),
+        ("c", "channel"),
+        ("r", "refresh"),
+        ("esc", "back"),
+        ("s", "save"),
+        ("l", "like"),
+        ("1-5", "feeds"),
+        ("/", "search"),
+        ("q", "quit"),
+    ];
+    let (guide, guide_w) = guide_line(&hints, " · ", &app.theme);
+    // When the guide does not fit beside the message it takes the whole
+    // row, so the keys are never squeezed into nothing.
+    let guide_width = if guide_w < usize::from(area.width) {
+        guide_w as u16 + 1
+    } else {
+        area.width
+    };
+    let chunks =
+        Layout::horizontal([Constraint::Fill(1), Constraint::Length(guide_width)]).split(area);
+
+    // Message left: live search guidance while the search row is focused,
+    // otherwise toast → download → fetch spinner → library counts.
     let left = if let Some(Overlay::Search(input)) = &app.overlay {
         let hint = if crate::app::App::looks_like_url(&input.value) {
             "enter opens this url  ·  esc cancel".to_string()
@@ -406,7 +442,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
             }
         };
         Line::from(Span::styled(
-            truncate(&hint, area.width as usize),
+            truncate(&hint, chunks[0].width as usize),
             Style::default().fg(app.theme.muted),
         ))
     } else {
@@ -449,52 +485,12 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
             )
         };
         Line::from(Span::styled(
-            truncate(&text, area.width as usize),
+            truncate(&text, chunks[0].width as usize),
             Style::default().fg(color),
         ))
     };
-    frame.render_widget(Paragraph::new(left), area);
-}
-
-/// Detail keybinds rendered below the flipped rule at the bottom right.
-fn draw_detail_keybinds(frame: &mut Frame, area: Rect, app: &App) {
-    if area.height == 0 || area.width == 0 {
-        return;
-    }
-    let keybinds = vec![
-        ("enter", "play"),
-        ("w", "watch later"),
-        ("d", "download"),
-        ("c", "channel"),
-        ("r", "refresh"),
-        ("esc", "back"),
-        ("s", "save"),
-        ("l", "like"),
-        ("1-5", "feeds"),
-        ("/", "search"),
-        ("q", "quit"),
-    ];
-    // Build right-aligned keybind line: key in accent, label muted, separated by ·
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    for (index, (key, label)) in keybinds.iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::styled(" · ", Style::default().fg(app.theme.muted)));
-        }
-        spans.push(Span::styled(
-            key.to_string(),
-            Style::default()
-                .fg(app.theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::styled(
-            format!(" {label}"),
-            Style::default().fg(app.theme.muted),
-        ));
-    }
-    frame.render_widget(
-        Paragraph::new(Line::from(spans)).alignment(Alignment::Right),
-        area,
-    );
+    frame.render_widget(Paragraph::new(left), chunks[0]);
+    frame.render_widget(Paragraph::new(guide).alignment(Alignment::Right), chunks[1]);
 }
 
 fn draw_overlay(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
@@ -592,26 +588,26 @@ fn draw_rule(frame: &mut Frame, area: Rect, theme: &Theme) {
     );
 }
 
-/// The user-provided decorative rule, flipped (reversed) and rendered
-/// just above the keybind guide.
+/// The user-provided decorative rule, flipped (reversed) and rendered flush
+/// against the right edge above the status row — no trailing space.
 fn draw_bottom_rule(frame: &mut Frame, area: Rect, app: &App) {
     if area.height == 0 || area.width == 0 {
         return;
     }
     let flipped = flip_rule(BOTTOM_RULE);
     let chars: Vec<char> = flipped.chars().collect();
-    // Keep the rule's tail so its right end lands on the screen edge,
-    // flush with the keybind guide below it.
+    // Keep the rule's tail so its last glyph lands on the screen edge.
     let width = usize::from(area.width).min(chars.len());
-    let width_u16 = width as u16;
     let tail: String = chars[chars.len() - width..].iter().collect();
-    let start_x = area.x.saturating_add(area.width.saturating_sub(width_u16));
+    let start_x = area
+        .x
+        .saturating_add(area.width.saturating_sub(width as u16));
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             tail,
             Style::default().fg(app.theme.accent2),
         ))),
-        Rect::new(start_x, area.y, width_u16, 1),
+        Rect::new(start_x, area.y, width as u16, 1),
     );
 }
 
@@ -777,6 +773,36 @@ fn hint_line(hints: &[(&str, &str)], theme: &Theme) -> Line<'static> {
         ));
     }
     Line::from(spans)
+}
+
+/// The right-side key guide: key picked out in the accent bold, label muted,
+/// custom separator — returned with its rendered width so the status layout
+/// can budget the message next to it.
+fn guide_line(hints: &[(&str, &str)], separator: &str, theme: &Theme) -> (Line<'static>, usize) {
+    let mut spans = Vec::new();
+    let mut width = 0usize;
+    for (index, (key_value, label)) in hints.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(
+                separator.to_string(),
+                Style::default().fg(theme.muted),
+            ));
+            width += separator.chars().count();
+        }
+        spans.push(Span::styled(
+            (*key_value).to_string(),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ));
+        width += key_value.chars().count();
+        spans.push(Span::styled(
+            format!(" {label}"),
+            Style::default().fg(theme.muted),
+        ));
+        width += 1 + label.chars().count();
+    }
+    (Line::from(spans), width)
 }
 
 fn section(label: &'static str, theme: &Theme) -> Line<'static> {
@@ -1010,6 +1036,58 @@ mod tests {
         let all = screen_text(&terminal);
         assert!(all.contains("51"), "page 2 must start at 51: {all}");
         assert!(all.contains("53"), "page 2 ends at 53: {all}");
+    }
+
+    #[test]
+    fn watch_later_and_liked_feeds_hide_view_counts() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = app();
+        app.view = View::Browse;
+        app.feed = Feed {
+            title: "Watch Later".into(),
+            source: "https://www.youtube.com/playlist?list=WL".into(),
+            kind: FeedKind::Playlist,
+            subtitle: "WATCH LATER".into(),
+            items: vec![Video {
+                id: "wl1".into(),
+                title: "A watch later video".into(),
+                view_count: Some(123_456),
+                ..Video::default()
+            }],
+            notice: None,
+            auth: true,
+            fetched_at: 0,
+        };
+        app.table_state.select(Some(0));
+
+        // The view count column is hidden here — no "123.5K" on the row.
+        terminal
+            .draw(|frame| draw(frame, &mut app, Instant::now()))
+            .unwrap();
+        let all = screen_text(&terminal);
+        assert!(
+            !all.contains("123.5K"),
+            "watch later must hide views: {all}"
+        );
+        assert!(!all.contains("123K"), "watch later must hide views: {all}");
+        assert!(all.contains("A watch later video"), "{all}");
+
+        // Liked videos hide it too.
+        app.feed.source = "https://www.youtube.com/playlist?list=LL".into();
+        terminal
+            .draw(|frame| draw(frame, &mut app, Instant::now()))
+            .unwrap();
+        let all = screen_text(&terminal);
+        assert!(!all.contains("123.5K"), "liked must hide views: {all}");
+
+        // A normal feed keeps the column.
+        app.feed.source = "https://www.youtube.com/feed/subscriptions".into();
+        terminal
+            .draw(|frame| draw(frame, &mut app, Instant::now()))
+            .unwrap();
+        let all = screen_text(&terminal);
+        assert!(all.contains("123.5K"), "other feeds keep views: {all}");
     }
 
     #[test]

@@ -10,6 +10,12 @@ use image::DynamicImage;
 use ratatui_image::picker::Picker;
 use std::path::Path;
 
+/// Every thumbnail is normalized to this pixel size. Feeds serve different
+/// artwork sizes (the home feed and playlist entries do not agree), so
+/// without this the details pane would draw them at different sizes.
+const THUMB_WIDTH: u32 = 480;
+const THUMB_HEIGHT: u32 = 270;
+
 /// Build a picker by querying the terminal, falling back to half-blocks when
 /// no graphics protocol or font size can be detected.
 pub fn picker() -> Picker {
@@ -45,10 +51,39 @@ pub async fn load(url: &str, cache_path: &Path) -> Result<DynamicImage> {
         }
     };
 
-    tokio::task::spawn_blocking(move || image::load_from_memory(&bytes))
-        .await
-        .context("thumbnail decoding task failed")?
-        .context("could not decode thumbnail")
+    tokio::task::spawn_blocking(move || {
+        image::load_from_memory(&bytes)
+            .map(normalize)
+            .context("could not decode thumbnail")
+    })
+    .await
+    .context("thumbnail decoding task failed")?
+}
+
+/// Crop an image to a 16:9 box and scale it to the fixed thumbnail size, so
+/// every feed draws its artwork at exactly the same dimensions.
+fn normalize(image: DynamicImage) -> DynamicImage {
+    let (width, height) = (image.width(), image.height());
+    if width == 0 || height == 0 {
+        return image;
+    }
+    // Centre-crop to 16:9, then scale to the fixed size.
+    let target = THUMB_WIDTH as f64 / THUMB_HEIGHT as f64;
+    let current = width as f64 / height as f64;
+    let (crop_width, crop_height) = if current > target {
+        let w = (height as f64 * target).round() as u32;
+        (w.min(width), height)
+    } else {
+        let h = (width as f64 / target).round() as u32;
+        (width, h.min(height))
+    };
+    let x = (width - crop_width) / 2;
+    let y = (height - crop_height) / 2;
+    image.crop_imm(x, y, crop_width, crop_height).resize_exact(
+        THUMB_WIDTH,
+        THUMB_HEIGHT,
+        image::imageops::FilterType::Triangle,
+    )
 }
 
 /// One HTTP client for every thumbnail. The first download builds it, later
@@ -80,4 +115,35 @@ async fn download(url: &str) -> Result<Vec<u8>> {
         .await
         .context("could not read thumbnail body")?;
     Ok(bytes.to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::Rgba;
+
+    fn image(width: u32, height: u32) -> DynamicImage {
+        image::DynamicImage::ImageRgba8(image::ImageBuffer::from_pixel(
+            width,
+            height,
+            Rgba([20u8, 40, 60, 255]),
+        ))
+    }
+
+    #[test]
+    fn normalize_scales_every_source_to_the_same_size() {
+        // Feeds serve different artwork sizes; all must land on one box.
+        for (width, height) in [(480u32, 270u32), (720, 404), (336, 188), (640, 480)] {
+            let out = normalize(image(width, height));
+            assert_eq!(out.width(), THUMB_WIDTH, "width for {width}x{height}");
+            assert_eq!(out.height(), THUMB_HEIGHT, "height for {width}x{height}");
+        }
+    }
+
+    #[test]
+    fn normalize_leaves_degenerate_images_alone() {
+        let out = normalize(image(0, 0));
+        assert_eq!(out.width(), 0);
+        assert_eq!(out.height(), 0);
+    }
 }

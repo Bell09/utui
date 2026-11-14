@@ -1484,12 +1484,18 @@ impl App {
         self.config.account_sync && self.config.cookies_browser.is_some()
     }
 
-    fn feed_is_watch_later_page(&self) -> bool {
+    pub fn feed_is_watch_later_page(&self) -> bool {
         self.feed.source.contains("list=WL")
     }
 
-    fn feed_is_liked_page(&self) -> bool {
+    pub fn feed_is_liked_page(&self) -> bool {
         self.feed.source.contains("list=LL")
+    }
+
+    /// Playlist feeds (Watch Later, Liked videos) list entries that rarely
+    /// carry a view count, so the list hides that column for them.
+    pub fn feed_hides_view_counts(&self) -> bool {
+        self.feed_is_watch_later_page() || self.feed_is_liked_page()
     }
 
     fn open_selected_channel(&mut self) {
